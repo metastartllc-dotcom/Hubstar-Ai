@@ -23,3 +23,20 @@ python -m app.cli.main interactive
 ```
 
 Мөн тайлангууд `data/output` хавтас дотор хадгалагдана. Excel импорт хийх мэдээллүүдийг `data/input` хавтсанд хийнэ үү.
+
+## API ашиглах заавар
+
+API серверийг ажиллуулах:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn app.api.main:app --reload
+```
+
+- Health check: [http://127.0.0.1:8000/health](http://127.0.0.1:8000/health)
+- Swagger docs: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+
+Тест ажиллуулах:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+```
