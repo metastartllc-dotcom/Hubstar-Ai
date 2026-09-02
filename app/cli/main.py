@@ -1,8 +1,18 @@
 import typer
 from rich.console import Console
 
-app = typer.Typer(help="Hubstar AI - Барилгын төслийн удирдлага, төсвийн систем")
+app = typer.Typer(
+    help="Hubstar AI - Барилгын төслийн удирдлага, төсвийн систем",
+    invoke_without_command=True,
+)
 console = Console()
+
+
+@app.callback(invoke_without_command=True)
+def main(ctx: typer.Context):
+    """Hubstar AI CLI-г эхлүүлэх."""
+    if ctx.invoked_subcommand is None:
+        interactive()
 
 def display_menu():
     console.print("\n[bold blue]--- Үндсэн цэс ---[/bold blue]")
