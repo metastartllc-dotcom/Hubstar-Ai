@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from typing import Optional, List
 from datetime import date, datetime
 from decimal import Decimal
@@ -50,6 +50,47 @@ class ProjectCreate(ProjectBase):
         if value == "":
             raise ValueError("must not be empty")
         return value
+
+class ProjectUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: Optional[str] = None
+    location: Optional[str] = None
+    project_type: Optional[str] = None
+    gross_floor_area: Optional[float] = Field(default=None, ge=0)
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    status: Optional[StatusEnum] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def require_update_fields(cls, data):
+        if isinstance(data, dict):
+            if not data:
+                raise ValueError("at least one field is required")
+            for field_name in ("name", "status"):
+                if field_name in data and data[field_name] is None:
+                    raise ValueError(f"{field_name} must not be null")
+        return data
+
+    @field_validator("name", "location", "project_type", mode="before")
+    @classmethod
+    def strip_non_empty_strings(cls, value):
+        if isinstance(value, str):
+            value = value.strip()
+            if value == "":
+                raise ValueError("must not be empty")
+        return value
+
+    @model_validator(mode="after")
+    def validate_date_order(self):
+        if (
+            self.start_date is not None
+            and self.end_date is not None
+            and self.start_date > self.end_date
+        ):
+            raise ValueError("start_date must be on or before end_date")
+        return self
 
 class ProjectResponse(ProjectBase):
     id: int

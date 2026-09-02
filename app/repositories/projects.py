@@ -4,7 +4,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.models.models import Project
-from app.schemas.schemas import ProjectCreate
+from app.schemas.schemas import ProjectCreate, ProjectUpdate
 
 
 class DuplicateProjectIdError(Exception):
@@ -13,6 +13,14 @@ class DuplicateProjectIdError(Exception):
 
 class ProjectCreationError(Exception):
     """Raised when a project cannot be persisted."""
+
+
+class ProjectUpdateError(Exception):
+    """Raised when a project update cannot be persisted."""
+
+
+class InvalidProjectDateRangeError(Exception):
+    """Raised when the effective project date range is invalid."""
 
 
 def list_projects(db: Session, offset: int, limit: int) -> list[Project]:
@@ -54,3 +62,38 @@ def create_project(db: Session, project_data: ProjectCreate) -> Project:
     except SQLAlchemyError as exc:
         db.rollback()
         raise ProjectCreationError from exc
+
+
+def update_project(
+    db: Session,
+    project_id: str,
+    project_data: ProjectUpdate,
+) -> Project | None:
+    """Update only fields explicitly supplied for an external project ID."""
+    try:
+        project = get_project_by_project_id(db, project_id)
+        if project is None:
+            return None
+
+        update_values = project_data.model_dump(exclude_unset=True)
+        effective_start_date = update_values.get("start_date", project.start_date)
+        effective_end_date = update_values.get("end_date", project.end_date)
+        if (
+            effective_start_date is not None
+            and effective_end_date is not None
+            and effective_start_date > effective_end_date
+        ):
+            db.rollback()
+            raise InvalidProjectDateRangeError
+
+        for field_name, value in update_values.items():
+            setattr(project, field_name, value)
+
+        db.commit()
+        db.refresh(project)
+        return project
+    except InvalidProjectDateRangeError:
+        raise
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise ProjectUpdateError from exc
