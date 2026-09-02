@@ -70,6 +70,19 @@ Invoke-RestMethod `
 Энэ write endpoint одоогоор зөвхөн local development зориулалттай. Authentication
 нэмэгдээгүй тул public орчинд deploy хийж болохгүй.
 
+### Төслийн мэдээллийг хэсэгчлэн шинэчлэх
+
+Зөвхөн өөрчлөх утгуудаа `PATCH /api/v1/projects/{project_id}` руу илгээнэ:
+
+```json
+{
+  "name": "Шинэчилсэн төслийн нэр"
+}
+```
+
+`project_id` нь immutable бөгөөд PATCH request body-д оруулахгүй. Мэдэхгүй optional
+утгыг тааж илгээхгүй.
+
 Тест ажиллуулах:
 
 ```powershell

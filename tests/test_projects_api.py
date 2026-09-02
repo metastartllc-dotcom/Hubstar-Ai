@@ -316,3 +316,223 @@ def test_project_list_validates_pagination(client, params, invalid_field):
 
     assert response.status_code == 422
     assert invalid_field in response.text
+
+
+def test_update_project_fields_and_get_detail(client, db_session):
+    add_project(db_session, "PRJ-UPDATE-001", "Original project")
+
+    response = client.patch(
+        "/api/v1/projects/PRJ-UPDATE-001",
+        json={
+            "name": "Updated project",
+            "location": "Ulaanbaatar",
+            "project_type": "Residential",
+            "gross_floor_area": 2400.5,
+        },
+    )
+    detail = client.get("/api/v1/projects/PRJ-UPDATE-001")
+
+    assert response.status_code == 200
+    assert response.json()["project_id"] == "PRJ-UPDATE-001"
+    assert response.json()["name"] == "Updated project"
+    assert response.json()["location"] == "Ulaanbaatar"
+    assert response.json()["project_type"] == "Residential"
+    assert response.json()["gross_floor_area"] == 2400.5
+    assert detail.status_code == 200
+    assert detail.json() == response.json()
+
+
+def test_partial_update_preserves_unspecified_fields(client, db_session):
+    project = add_project(db_session, "PRJ-PARTIAL", "Original name")
+    project.location = "Original location"
+    project.project_type = "Commercial"
+    project.gross_floor_area = 1000.0
+    project.status = StatusEnum.NEEDS_REVIEW
+    db_session.commit()
+
+    response = client.patch(
+        "/api/v1/projects/PRJ-PARTIAL",
+        json={"name": "Partial update"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["name"] == "Partial update"
+    assert response.json()["location"] == "Original location"
+    assert response.json()["project_type"] == "Commercial"
+    assert response.json()["gross_floor_area"] == 1000.0
+    assert response.json()["status"] == "NEEDS_REVIEW"
+
+
+def test_update_trims_string_fields(client, db_session):
+    add_project(db_session, "PRJ-TRIM-UPDATE", "Original")
+
+    response = client.patch(
+        "/api/v1/projects/PRJ-TRIM-UPDATE",
+        json={
+            "name": "  Trimmed name  ",
+            "location": "  Ulaanbaatar  ",
+            "project_type": "  Residential  ",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["name"] == "Trimmed name"
+    assert response.json()["location"] == "Ulaanbaatar"
+    assert response.json()["project_type"] == "Residential"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"unknown_field": "value"},
+        {"id": 99},
+        {"project_id": "PRJ-CHANGED"},
+        {"owner_organization_id": 1},
+        {"contractor_organization_id": 1},
+    ],
+)
+def test_update_rejects_empty_unknown_and_forbidden_fields(
+    client,
+    db_session,
+    payload,
+):
+    add_project(db_session, "PRJ-FORBIDDEN", "Original")
+
+    response = client.patch("/api/v1/projects/PRJ-FORBIDDEN", json=payload)
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"name": ""},
+        {"name": "   "},
+        {"name": None},
+        {"location": ""},
+        {"location": "   "},
+        {"project_type": ""},
+        {"project_type": "   "},
+    ],
+)
+def test_update_rejects_empty_strings(client, db_session, payload):
+    add_project(db_session, "PRJ-EMPTY-UPDATE", "Original")
+
+    response = client.patch("/api/v1/projects/PRJ-EMPTY-UPDATE", json=payload)
+
+    assert response.status_code == 422
+
+
+def test_update_allows_clearing_optional_strings(client, db_session):
+    project = add_project(db_session, "PRJ-CLEAR-OPTIONAL", "Original")
+    project.location = "Old location"
+    project.project_type = "Old type"
+    db_session.commit()
+
+    response = client.patch(
+        "/api/v1/projects/PRJ-CLEAR-OPTIONAL",
+        json={"location": None, "project_type": None},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["location"] is None
+    assert response.json()["project_type"] is None
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"gross_floor_area": -1},
+        {"status": "UNKNOWN"},
+        {"status": None},
+        {"start_date": "2027-01-02", "end_date": "2027-01-01"},
+    ],
+)
+def test_update_rejects_invalid_values(client, db_session, payload):
+    add_project(db_session, "PRJ-INVALID-UPDATE", "Original")
+
+    response = client.patch("/api/v1/projects/PRJ-INVALID-UPDATE", json=payload)
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("payload", "start_date", "end_date"),
+    [
+        ({"start_date": "2027-01-02"}, "2026-01-01", "2027-01-01"),
+        ({"end_date": "2025-12-31"}, "2026-01-01", "2027-01-01"),
+    ],
+)
+def test_update_validates_against_existing_dates(
+    client,
+    db_session,
+    payload,
+    start_date,
+    end_date,
+):
+    project = add_project(db_session, "PRJ-DATE-UPDATE", "Original")
+    project.start_date = __import__("datetime").date.fromisoformat(start_date)
+    project.end_date = __import__("datetime").date.fromisoformat(end_date)
+    db_session.commit()
+
+    response = client.patch("/api/v1/projects/PRJ-DATE-UPDATE", json=payload)
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": "start_date must be on or before end_date"
+    }
+
+
+def test_update_status(client, db_session):
+    add_project(db_session, "PRJ-STATUS-UPDATE", "Original")
+
+    response = client.patch(
+        "/api/v1/projects/PRJ-STATUS-UPDATE",
+        json={"status": "NEEDS_REVIEW"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "NEEDS_REVIEW"
+
+
+def test_update_unknown_project_returns_404(client):
+    response = client.patch(
+        "/api/v1/projects/UNKNOWN",
+        json={"name": "Updated"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Project not found"}
+
+
+def test_update_database_error_rolls_back_and_hides_details(
+    client,
+    db_session,
+    monkeypatch,
+):
+    add_project(db_session, "PRJ-UPDATE-ERROR", "Original")
+    rollback_called = False
+    original_rollback = db_session.rollback
+
+    def fail_commit():
+        raise projects_repository.SQLAlchemyError("SQL: hidden update failure")
+
+    def track_rollback():
+        nonlocal rollback_called
+        rollback_called = True
+        original_rollback()
+
+    monkeypatch.setattr(db_session, "commit", fail_commit)
+    monkeypatch.setattr(db_session, "rollback", track_rollback)
+
+    response = client.patch(
+        "/api/v1/projects/PRJ-UPDATE-ERROR",
+        json={"name": "Should not persist"},
+    )
+
+    assert rollback_called is True
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Unable to update project"}
+    assert "SQL" not in response.text
+    assert "hidden" not in response.text
