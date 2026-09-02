@@ -7,13 +7,36 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.repositories.projects import (
+    DuplicateProjectIdError,
+    ProjectCreationError,
+    create_project,
     get_project_by_project_id,
     list_projects,
 )
-from app.schemas.schemas import ProjectResponse
+from app.schemas.schemas import ProjectCreate, ProjectResponse
 
 
 router = APIRouter(prefix="/api/v1/projects", tags=["projects"])
+
+
+@router.post("", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
+def create_new_project(
+    project_data: ProjectCreate,
+    db: Annotated[Session, Depends(get_db)],
+) -> ProjectResponse:
+    """Create a project for local development use."""
+    try:
+        return create_project(db, project_data)
+    except DuplicateProjectIdError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Project ID already exists",
+        ) from exc
+    except ProjectCreationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to create project",
+        ) from exc
 
 
 @router.get("", response_model=list[ProjectResponse])

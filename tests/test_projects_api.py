@@ -1,5 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -7,6 +8,12 @@ from sqlalchemy.pool import StaticPool
 from app.api.main import app
 from app.core.database import Base, get_db
 from app.models.models import Project, StatusEnum
+from app.repositories import projects as projects_repository
+from app.repositories.projects import (
+    DuplicateProjectIdError,
+    ProjectCreationError,
+)
+from app.schemas.schemas import ProjectCreate
 
 
 @pytest.fixture()
@@ -101,6 +108,199 @@ def test_unknown_project_returns_404(client):
 
     assert response.status_code == 404
     assert response.json() == {"detail": "Project not found"}
+
+
+def test_create_project_returns_201_and_response(client):
+    response = client.post(
+        "/api/v1/projects",
+        json={
+            "project_id": "  PRJ-CREATE-001  ",
+            "name": "  New project  ",
+            "location": "  Ulaanbaatar  ",
+            "project_type": "  Residential  ",
+            "gross_floor_area": 1250.5,
+            "start_date": "2026-09-01",
+            "end_date": "2027-09-01",
+            "status": "ACTIVE",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json() == {
+        "id": 1,
+        "project_id": "PRJ-CREATE-001",
+        "name": "New project",
+        "location": "Ulaanbaatar",
+        "project_type": "Residential",
+        "gross_floor_area": 1250.5,
+        "start_date": "2026-09-01",
+        "end_date": "2027-09-01",
+        "status": "ACTIVE",
+        "owner_organization_id": None,
+        "contractor_organization_id": None,
+    }
+
+
+def test_created_project_appears_in_list_and_detail(client):
+    create_response = client.post(
+        "/api/v1/projects",
+        json={"project_id": "PRJ-CREATE-002", "name": "Listed project"},
+    )
+    assert create_response.status_code == 201
+
+    list_response = client.get("/api/v1/projects")
+    detail_response = client.get("/api/v1/projects/PRJ-CREATE-002")
+
+    assert list_response.status_code == 200
+    assert [project["project_id"] for project in list_response.json()] == [
+        "PRJ-CREATE-002"
+    ]
+    assert detail_response.status_code == 200
+    assert detail_response.json()["project_id"] == "PRJ-CREATE-002"
+    assert detail_response.json()["name"] == "Listed project"
+
+
+def test_trimmed_project_id_works_in_response_and_detail(client):
+    response = client.post(
+        "/api/v1/projects",
+        json={"project_id": "  PRJ-TRIMMED  ", "name": "  Trimmed project  "},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["project_id"] == "PRJ-TRIMMED"
+    assert response.json()["name"] == "Trimmed project"
+    assert client.get("/api/v1/projects/PRJ-TRIMMED").status_code == 200
+
+
+def test_duplicate_project_id_returns_409_and_session_recovers(client):
+    payload = {"project_id": "PRJ-DUPLICATE", "name": "Original project"}
+    assert client.post("/api/v1/projects", json=payload).status_code == 201
+
+    duplicate_response = client.post(
+        "/api/v1/projects",
+        json={"project_id": "PRJ-DUPLICATE", "name": "Duplicate project"},
+    )
+    recovery_response = client.post(
+        "/api/v1/projects",
+        json={"project_id": "PRJ-AFTER-DUPLICATE", "name": "Recovered session"},
+    )
+
+    assert duplicate_response.status_code == 409
+    assert duplicate_response.json() == {"detail": "Project ID already exists"}
+    assert recovery_response.status_code == 201
+    assert client.get("/api/v1/projects/PRJ-AFTER-DUPLICATE").status_code == 200
+
+
+def test_duplicate_project_id_after_trimming_returns_409(client):
+    assert client.post(
+        "/api/v1/projects",
+        json={"project_id": "PRJ-TRIM-DUP", "name": "Original"},
+    ).status_code == 201
+
+    response = client.post(
+        "/api/v1/projects",
+        json={"project_id": "  PRJ-TRIM-DUP  ", "name": "Duplicate"},
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "Project ID already exists"}
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"name": "Missing project ID"},
+        {"project_id": None, "name": "Null project ID"},
+        {"project_id": "PRJ-EMPTY-NAME", "name": ""},
+        {"project_id": "PRJ-WHITESPACE-NAME", "name": "   "},
+        {"project_id": "", "name": "Project"},
+        {"project_id": "   ", "name": "Project"},
+    ],
+)
+def test_create_project_rejects_empty_identifiers(client, payload):
+    response = client.post("/api/v1/projects", json=payload)
+
+    assert response.status_code == 422
+
+
+def test_create_project_rejects_negative_gross_floor_area(client):
+    response = client.post(
+        "/api/v1/projects",
+        json={
+            "project_id": "PRJ-NEGATIVE-AREA",
+            "name": "Invalid project",
+            "gross_floor_area": -1,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_integrity_error_rolls_back_before_duplicate_lookup(monkeypatch):
+    events = []
+    db = type("FakeSession", (), {})()
+    db.add = lambda project: events.append("add")
+
+    def fail_commit():
+        events.append("commit")
+        raise IntegrityError("hidden statement", {}, Exception("hidden database error"))
+
+    db.commit = fail_commit
+    db.rollback = lambda: events.append("rollback")
+    db.refresh = lambda project: events.append("refresh")
+    lookup_results = iter([None, Project(project_id="PRJ-RACE", name="Existing")])
+
+    def lookup(db_arg, project_id):
+        events.append("lookup")
+        return next(lookup_results)
+
+    monkeypatch.setattr(projects_repository, "get_project_by_project_id", lookup)
+
+    with pytest.raises(DuplicateProjectIdError):
+        projects_repository.create_project(
+            db,
+            ProjectCreate(project_id="PRJ-RACE", name="Race project"),
+        )
+
+    assert events == ["lookup", "add", "commit", "rollback", "lookup"]
+
+
+def test_non_duplicate_integrity_error_is_not_misreported(monkeypatch):
+    db = type("FakeSession", (), {})()
+    db.add = lambda project: None
+    db.commit = lambda: (_ for _ in ()).throw(
+        IntegrityError("hidden statement", {}, Exception("hidden database error"))
+    )
+    db.rollback = lambda: None
+    db.refresh = lambda project: None
+    monkeypatch.setattr(
+        projects_repository,
+        "get_project_by_project_id",
+        lambda db_arg, project_id: None,
+    )
+
+    with pytest.raises(ProjectCreationError):
+        projects_repository.create_project(
+            db,
+            ProjectCreate(project_id="PRJ-INTEGRITY", name="Integrity failure"),
+        )
+
+
+def test_internal_project_creation_error_is_hidden(client, monkeypatch):
+    def fail_create(db, project_data):
+        raise ProjectCreationError("SQL: hidden internal database detail")
+
+    monkeypatch.setattr("app.api.routes.projects.create_project", fail_create)
+
+    response = client.post(
+        "/api/v1/projects",
+        json={"project_id": "PRJ-HIDDEN-ERROR", "name": "Hidden error"},
+    )
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Unable to create project"}
+    assert "SQL" not in response.text
+    assert "hidden" not in response.text
 
 
 @pytest.mark.parametrize(
