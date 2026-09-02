@@ -88,3 +88,31 @@ Invoke-RestMethod `
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
 ```
+
+## Төслийн ажлын API
+
+Төслийн external ID-аар ажлын жагсаалт авах:
+
+```text
+GET http://127.0.0.1:8000/api/v1/projects/PRJ-ALTAI-R7-B/work-items?offset=0&limit=100
+```
+
+Ажил шинээр бүртгэх (зөвхөн local development):
+
+```json
+POST /api/v1/projects/PRJ-ALTAI-R7-B/work-items
+{
+  "work_id": "PRJ-ALTAI-R7-B-WRK-001",
+  "name": "Суурийн ажил",
+  "unit": "м2",
+  "quantity": 10.005,
+  "labor_unit_rate": 1
+}
+```
+
+`work_id` нь системийн хэмжээнд unique байх ёстой. Санал болгосон формат нь
+`{PROJECT_ID}-WRK-{SEQUENCE}`. Client URL-д external project ID ашиглах бөгөөд
+internal integer project ID-г request body-д илгээхгүй. Танигдсан нэгжийн alias-ыг
+нормчилно; танигдаагүй нэгжийг захын зайг цэвэрлээд эх утгаар нь хадгална.
+`quantity` болон `labor_unit_rate` хоёул байвал сервер `labor_total`-ийг Decimal-аар
+тооцож, half-up дүрмээр хоёр орны нарийвчлалтай тоймлоно.

@@ -4,6 +4,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
 from app.models.models import StatusEnum
+from app.validators.units import UnitNormalizer
 
 class OrganizationBase(BaseModel):
     organization_id: Optional[str] = None
@@ -112,6 +113,52 @@ class WorkItemCreate(WorkItemBase):
 
 class WorkItemResponse(WorkItemBase):
     id: int
+    model_config = ConfigDict(from_attributes=True)
+
+class ProjectWorkItemCreate(BaseModel):
+    """Work item payload scoped to the project identified by the URL."""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    work_id: str
+    name: str
+    wbs_code: Optional[str] = None
+    unit: Optional[str] = None
+    quantity: Optional[float] = Field(default=None, ge=0)
+    labor_unit_rate: Optional[float] = Field(default=None, ge=0)
+    status: StatusEnum = StatusEnum.ACTIVE
+
+    @field_validator("work_id", "name", "wbs_code", mode="before")
+    @classmethod
+    def strip_non_empty_strings(cls, value):
+        if isinstance(value, str):
+            value = value.strip()
+            if value == "":
+                raise ValueError("must not be empty")
+        return value
+
+    @field_validator("unit", mode="before")
+    @classmethod
+    def normalize_non_empty_unit(cls, value):
+        if isinstance(value, str):
+            value = value.strip()
+            if value == "":
+                raise ValueError("must not be empty")
+            return UnitNormalizer.normalize(value)
+        return value
+
+class ProjectWorkItemResponse(BaseModel):
+    """Work item response without the internal project foreign key."""
+
+    id: int
+    work_id: str
+    name: str
+    wbs_code: Optional[str] = None
+    unit: Optional[str] = None
+    quantity: Optional[float] = None
+    labor_unit_rate: Optional[float] = None
+    labor_total: Optional[float] = None
+    status: StatusEnum
     model_config = ConfigDict(from_attributes=True)
 
 class MaterialBase(BaseModel):
