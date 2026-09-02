@@ -43,6 +43,33 @@ API серверийг ажиллуулах:
 - Projects: [http://127.0.0.1:8000/api/v1/projects](http://127.0.0.1:8000/api/v1/projects)
 - Project detail: `http://127.0.0.1:8000/api/v1/projects/{project_id}`
 
+### Төсөл шинээр бүртгэх
+
+Swagger интерфэйсийн `POST /api/v1/projects` хэсгийг ашиглах эсвэл дараах JSON
+хүсэлтийг илгээнэ. `project_id` нь заавал өгөх, хоосон биш external ID байна.
+
+```powershell
+$body = @{
+    project_id = "PRJ-001"
+    name = "Орон сууцны төсөл"
+    location = "Улаанбаатар"
+    project_type = "Residential"
+    gross_floor_area = 1250.5
+    start_date = "2026-09-01"
+    end_date = "2027-09-01"
+    status = "ACTIVE"
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+    -Method Post `
+    -Uri "http://127.0.0.1:8000/api/v1/projects" `
+    -ContentType "application/json" `
+    -Body $body
+```
+
+Энэ write endpoint одоогоор зөвхөн local development зориулалттай. Authentication
+нэмэгдээгүй тул public орчинд deploy хийж болохгүй.
+
 Тест ажиллуулах:
 
 ```powershell

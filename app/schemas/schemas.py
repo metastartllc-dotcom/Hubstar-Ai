@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Optional, List
 from datetime import date, datetime
 from decimal import Decimal
@@ -34,7 +34,22 @@ class ProjectBase(BaseModel):
     contractor_organization_id: Optional[int] = None
 
 class ProjectCreate(ProjectBase):
-    pass
+    project_id: str
+    gross_floor_area: Optional[float] = Field(default=None, ge=0)
+
+    @field_validator("project_id", "name", "location", "project_type", mode="before")
+    @classmethod
+    def strip_string_fields(cls, value):
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
+    @field_validator("project_id", "name")
+    @classmethod
+    def reject_empty_identifiers(cls, value):
+        if value == "":
+            raise ValueError("must not be empty")
+        return value
 
 class ProjectResponse(ProjectBase):
     id: int
