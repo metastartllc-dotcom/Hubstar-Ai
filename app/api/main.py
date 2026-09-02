@@ -2,8 +2,11 @@
 
 from fastapi import FastAPI
 
+from app.api.routes.projects import router as projects_router
+
 
 app = FastAPI(title="Hubstar AI", docs_url="/docs")
+app.include_router(projects_router)
 
 
 @app.get("/")

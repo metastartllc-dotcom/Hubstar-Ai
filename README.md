@@ -26,6 +26,12 @@ python -m app.cli.main interactive
 
 ## API ашиглах заавар
 
+Өгөгдлийн сангийн хүснэгтүүдийг анх удаа үүсгэх:
+
+```powershell
+.\.venv\Scripts\python.exe -m app.core.init_db
+```
+
 API серверийг ажиллуулах:
 
 ```powershell
@@ -34,6 +40,8 @@ API серверийг ажиллуулах:
 
 - Health check: [http://127.0.0.1:8000/health](http://127.0.0.1:8000/health)
 - Swagger docs: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+- Projects: [http://127.0.0.1:8000/api/v1/projects](http://127.0.0.1:8000/api/v1/projects)
+- Project detail: `http://127.0.0.1:8000/api/v1/projects/{project_id}`
 
 Тест ажиллуулах:
 
