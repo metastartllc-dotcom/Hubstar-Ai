@@ -12,8 +12,13 @@ from app.repositories.materials import (
     create_material,
     get_material_by_material_id,
     list_materials,
+    update_material,
 )
-from app.schemas.schemas import MaterialCreateRequest, MaterialPublicResponse
+from app.schemas.schemas import (
+    MaterialCreateRequest,
+    MaterialPublicResponse,
+    MaterialUpdateRequest,
+)
 
 
 router = APIRouter(prefix="/api/v1/materials", tags=["materials"])
@@ -63,3 +68,19 @@ def create_new_material(
         raise HTTPException(status_code=409, detail="Material ID already exists") from exc
     except MaterialPersistenceError as exc:
         raise HTTPException(status_code=500, detail="Unable to create material") from exc
+
+
+@router.patch("/{material_id}", response_model=MaterialPublicResponse)
+def update_existing_material(
+    material_id: str,
+    material_data: MaterialUpdateRequest,
+    db: Annotated[Session, Depends(get_db)],
+) -> MaterialPublicResponse:
+    """Partially update mutable material master data."""
+    try:
+        material = update_material(db, material_id, material_data)
+    except MaterialPersistenceError as exc:
+        raise HTTPException(status_code=500, detail="Unable to update material") from exc
+    if material is None:
+        raise HTTPException(status_code=404, detail="Material not found")
+    return material

@@ -219,6 +219,57 @@ class MaterialCreateRequest(BaseModel):
             return UnitNormalizer.normalize(value)
         return value
 
+
+class MaterialUpdateRequest(BaseModel):
+    """Partial public update without immutable or internal identifiers."""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    name: Optional[str] = None
+    master_id: Optional[str] = None
+    code: Optional[str] = None
+    specification: Optional[str] = None
+    normalized_unit: Optional[str] = None
+    unit_price: Optional[float] = Field(default=None, ge=0)
+    status: Optional[StatusEnum] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def require_update_fields(cls, data):
+        if isinstance(data, dict):
+            if not data:
+                raise ValueError("at least one field is required")
+            for field_name in ("name", "status"):
+                if field_name in data and data[field_name] is None:
+                    raise ValueError(f"{field_name} must not be null")
+        return data
+
+    @field_validator(
+        "name",
+        "master_id",
+        "code",
+        "specification",
+        mode="before",
+    )
+    @classmethod
+    def strip_non_empty_strings(cls, value):
+        if isinstance(value, str):
+            value = value.strip()
+            if value == "":
+                raise ValueError("must not be empty")
+        return value
+
+    @field_validator("normalized_unit", mode="before")
+    @classmethod
+    def normalize_unit(cls, value):
+        if isinstance(value, str):
+            value = value.strip()
+            if value == "":
+                raise ValueError("must not be empty")
+            return UnitNormalizer.normalize(value)
+        return value
+
+
 class MaterialPublicResponse(BaseModel):
     """Public material representation without internal or supplier IDs."""
 

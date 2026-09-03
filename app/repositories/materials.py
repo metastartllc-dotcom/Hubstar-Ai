@@ -4,7 +4,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.models.models import Material
-from app.schemas.schemas import MaterialCreateRequest
+from app.schemas.schemas import MaterialCreateRequest, MaterialUpdateRequest
 
 
 class DuplicateMaterialIdError(Exception):
@@ -63,6 +63,26 @@ def create_material(
         if duplicate is not None:
             raise DuplicateMaterialIdError from exc
         raise MaterialPersistenceError from exc
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise MaterialPersistenceError from exc
+
+
+def update_material(
+    db: Session,
+    material_id: str,
+    material_data: MaterialUpdateRequest,
+) -> Material | None:
+    """Update only explicitly supplied mutable fields on one material."""
+    try:
+        material = _find_material(db, material_id)
+        if material is None:
+            return None
+        for field_name, value in material_data.model_dump(exclude_unset=True).items():
+            setattr(material, field_name, value)
+        db.commit()
+        db.refresh(material)
+        return material
     except SQLAlchemyError as exc:
         db.rollback()
         raise MaterialPersistenceError from exc
