@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from typing import Optional, List
+from typing import Literal, Optional, List
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
@@ -336,6 +336,32 @@ class WorkMaterialPublicResponse(BaseModel):
     effective_quantity: float
     material_total: Optional[float] = None
     status: StatusEnum
+
+
+class WorkBudgetSummaryResponse(BaseModel):
+    """Known work budget values without internal identifiers or VAT."""
+
+    project_id: str
+    work_id: str
+    name: str
+    unit: Optional[str] = None
+    quantity: Optional[float] = None
+    labor_unit_rate: Optional[float] = None
+    labor_total: Optional[float] = None
+    material_link_count: int
+    priced_material_count: int
+    missing_price_count: int
+    needs_review_count: int
+    material_subtotal_known: float
+    subtotal_known_before_vat: float
+    is_pricing_complete: bool
+    has_review_warnings: bool
+    pricing_status: Literal[
+        "NO_MATERIALS", "COMPLETE", "NEEDS_REVIEW", "INCOMPLETE"
+    ]
+    missing_price_material_ids: List[str]
+    needs_review_material_ids: List[str]
+    warnings: List[str]
 
 
 class EquipmentBase(BaseModel):

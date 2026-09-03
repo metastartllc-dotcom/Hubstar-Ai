@@ -201,3 +201,34 @@ price snapshot болон price history-г дараагийн шатанд нэ�
 Иймээс duplicate хамгаалалт нь application-level бөгөөд зөвхөн local-development,
 single-writer хэрэглээнд тохирно. Public эсвэл multi-user deployment хийхийн өмнө
 composite unique migration болон authentication заавал нэмнэ.
+
+## Нэг ажлын мэдэгдэж буй төсвийн summary
+
+```text
+GET /api/v1/projects/PRJ-ALTAI-R7-B/work-items/PRJ-ALTAI-R7-B-WRK-001/summary
+```
+
+Жишээ response:
+
+```json
+{
+  "project_id": "PRJ-ALTAI-R7-B",
+  "work_id": "PRJ-ALTAI-R7-B-WRK-001",
+  "labor_total": 255000000,
+  "material_link_count": 6,
+  "priced_material_count": 2,
+  "missing_price_count": 4,
+  "needs_review_count": 1,
+  "material_subtotal_known": 71145000,
+  "subtotal_known_before_vat": 326145000,
+  "is_pricing_complete": false,
+  "has_review_warnings": true,
+  "pricing_status": "INCOMPLETE"
+}
+```
+
+`subtotal_known_before_vat` нь зөвхөн одоогоор үнэ мэдэгдэж буй хөдөлмөр болон
+материалын хэсэг бөгөөд бүрэн нийт төсөв биш. `INCOMPLETE` үед үүнийг бүрэн төсөв
+гэж ашиглаж болохгүй. Энэ endpoint-д НӨАТ, тээвэр, тоног төхөөрөмж болон historical
+price snapshot хараахан ороогүй. Material master-ийн одоогийн үнэ өөрчлөгдвөл
+summary мөн шинэ үнээр дахин тооцогдоно.
