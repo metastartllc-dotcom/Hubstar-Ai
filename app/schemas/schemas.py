@@ -179,6 +179,59 @@ class MaterialResponse(MaterialBase):
     id: int
     model_config = ConfigDict(from_attributes=True)
 
+class MaterialCreateRequest(BaseModel):
+    """Public material creation payload without internal database IDs."""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    material_id: str
+    name: str
+    master_id: Optional[str] = None
+    code: Optional[str] = None
+    specification: Optional[str] = None
+    normalized_unit: Optional[str] = None
+    unit_price: Optional[float] = Field(default=None, ge=0)
+    status: StatusEnum = StatusEnum.ACTIVE
+
+    @field_validator(
+        "material_id",
+        "name",
+        "master_id",
+        "code",
+        "specification",
+        mode="before",
+    )
+    @classmethod
+    def strip_non_empty_strings(cls, value):
+        if isinstance(value, str):
+            value = value.strip()
+            if value == "":
+                raise ValueError("must not be empty")
+        return value
+
+    @field_validator("normalized_unit", mode="before")
+    @classmethod
+    def normalize_unit(cls, value):
+        if isinstance(value, str):
+            value = value.strip()
+            if value == "":
+                raise ValueError("must not be empty")
+            return UnitNormalizer.normalize(value)
+        return value
+
+class MaterialPublicResponse(BaseModel):
+    """Public material representation without internal or supplier IDs."""
+
+    material_id: str
+    master_id: Optional[str] = None
+    code: Optional[str] = None
+    name: str
+    specification: Optional[str] = None
+    normalized_unit: Optional[str] = None
+    unit_price: Optional[float] = None
+    status: StatusEnum
+    model_config = ConfigDict(from_attributes=True)
+
 class WorkMaterialLinkBase(BaseModel):
     work_id: Optional[int] = None
     material_id: Optional[int] = None
