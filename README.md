@@ -142,3 +142,45 @@ POST /api/v1/materials
 internal integer ID ашиглахгүй. `unit_price` нь MNT-ээр илэрхийлсэн одоогийн snapshot
 үнэ. Price history болон supplier source мэдээллийг дараагийн шатанд тусдаа бүтэцтэй
 нэмнэ. Authentication байхгүй тул write endpoint-ийг public орчинд ашиглахгүй.
+
+## Ажлын материалын хэрэгцээний API
+
+Тухайн ажилд холбосон материалыг external project, work ID-аар авах:
+
+```text
+GET /api/v1/projects/PRJ-ALTAI-R7-B/work-items/PRJ-ALTAI-R7-B-WRK-001/materials
+```
+
+Материал холбох (зөвхөн local development):
+
+```json
+POST /api/v1/projects/PRJ-ALTAI-R7-B/work-items/PRJ-ALTAI-R7-B-WRK-001/materials
+{
+  "material_id": "PRD-ALTAI-B-001",
+  "consumption_rate": 1.05,
+  "waste_percentage": 5,
+  "approved_quantity": 5500
+}
+```
+
+`consumption_rate` нь материалын нэгж / ажлын нэгж гэсэн утгатай. Сервер дараах
+томьёогоор хэрэгцээг тооцно:
+
+```text
+calculated_quantity = work_quantity × consumption_rate × (1 + waste_percentage / 100)
+effective_quantity = approved_quantity (өгөгдсөн бол), бусад үед calculated_quantity
+material_total = effective_quantity × unit_price
+```
+
+Тооцоолсон болон effective quantity-г 3, материалын нийт үнийг 2 орны
+нарийвчлалтай `ROUND_HALF_UP` дүрмээр тоймлоно. Material master дээр `unit_price`
+байхгүй бол `material_total` нь `null` байна.
+
+Link model нь үнийн snapshot хадгалдаггүй. Material master-ийн үнэ шинэчлэгдэхэд
+GET response дахь link-ийн `material_total` мөн шинэ үнээр өөрчлөгдөнө; historical
+price snapshot болон price history-г дараагийн шатанд нэмнэ.
+
+Одоогийн database-д `(work_id, material_id)` composite unique constraint байхгүй.
+Иймээс duplicate хамгаалалт нь application-level бөгөөд зөвхөн local-development,
+single-writer хэрэглээнд тохирно. Public эсвэл multi-user deployment хийхийн өмнө
+composite unique migration болон authentication заавал нэмнэ.

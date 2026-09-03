@@ -248,6 +248,45 @@ class WorkMaterialLinkResponse(WorkMaterialLinkBase):
     id: int
     model_config = ConfigDict(from_attributes=True)
 
+
+class WorkMaterialCreateRequest(BaseModel):
+    """Public request for linking material master data to a work item."""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    material_id: str
+    consumption_rate: float = Field(ge=0)
+    waste_percentage: float = Field(default=0, ge=0)
+    approved_quantity: Optional[float] = Field(default=None, ge=0)
+    status: StatusEnum = StatusEnum.ACTIVE
+
+    @field_validator("material_id", mode="before")
+    @classmethod
+    def strip_material_id(cls, value):
+        if isinstance(value, str):
+            value = value.strip()
+            if value == "":
+                raise ValueError("must not be empty")
+        return value
+
+
+class WorkMaterialPublicResponse(BaseModel):
+    """Linked material response without internal database identifiers."""
+
+    material_id: str
+    name: str
+    specification: Optional[str] = None
+    normalized_unit: Optional[str] = None
+    unit_price: Optional[float] = None
+    consumption_rate: float
+    waste_percentage: float
+    calculated_quantity: float
+    approved_quantity: Optional[float] = None
+    effective_quantity: float
+    material_total: Optional[float] = None
+    status: StatusEnum
+
+
 class EquipmentBase(BaseModel):
     equipment_id: Optional[str] = None
     master_id: Optional[str] = None
