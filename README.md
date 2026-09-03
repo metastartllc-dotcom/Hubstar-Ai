@@ -143,6 +143,23 @@ internal integer ID ашиглахгүй. `unit_price` нь MNT-ээр илэр�
 үнэ. Price history болон supplier source мэдээллийг дараагийн шатанд тусдаа бүтэцтэй
 нэмнэ. Authentication байхгүй тул write endpoint-ийг public орчинд ашиглахгүй.
 
+Material-ийн зөвхөн өгсөн талбаруудыг хэсэгчлэн шинэчлэх (зөвхөн local development):
+
+```json
+PATCH /api/v1/materials/PRD-ALTAI-B-005
+{
+  "specification": "Шинэчилсэн техникийн үзүүлэлт",
+  "normalized_unit": "ш",
+  "unit_price": 1600
+}
+```
+
+`material_id` нь immutable тул request body-д оруулахгүй. `unit_price`-д `null`
+илгээж үнийг “тодорхойгүй” болгон цэвэрлэж болно. Link нь үнийн snapshot
+хадгалдаггүй учраас үнэ өөрчлөгдвөл холбоотой ажлын `material_total` GET response-д
+шинэ үнээр дахин тооцогдоно. Authentication байхгүй тул PATCH endpoint мөн
+local-development-only бөгөөд public орчинд ашиглахгүй.
+
 ## Ажлын материалын хэрэгцээний API
 
 Тухайн ажилд холбосон материалыг external project, work ID-аар авах:
