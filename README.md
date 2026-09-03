@@ -116,3 +116,29 @@ internal integer project ID-г request body-д илгээхгүй. Танигд�
 нормчилно; танигдаагүй нэгжийг захын зайг цэвэрлээд эх утгаар нь хадгална.
 `quantity` болон `labor_unit_rate` хоёул байвал сервер `labor_total`-ийг Decimal-аар
 тооцож, half-up дүрмээр хоёр орны нарийвчлалтай тоймлоно.
+
+## Material master API
+
+Material жагсаалт болон detail:
+
+```text
+GET http://127.0.0.1:8000/api/v1/materials?offset=0&limit=100
+GET http://127.0.0.1:8000/api/v1/materials/PRD-ALTAI-B-127
+```
+
+Material үүсгэх (зөвхөн local development):
+
+```json
+POST /api/v1/materials
+{
+  "material_id": "PRD-ALTAI-B-127",
+  "name": "Барилгын силикон/нейтрал чигжээс",
+  "normalized_unit": "картриж",
+  "unit_price": 25000
+}
+```
+
+`material_id` нь системийн хэмжээнд unique global external identifier бөгөөд client
+internal integer ID ашиглахгүй. `unit_price` нь MNT-ээр илэрхийлсэн одоогийн snapshot
+үнэ. Price history болон supplier source мэдээллийг дараагийн шатанд тусдаа бүтэцтэй
+нэмнэ. Authentication байхгүй тул write endpoint-ийг public орчинд ашиглахгүй.

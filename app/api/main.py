@@ -4,11 +4,13 @@ from fastapi import FastAPI
 
 from app.api.routes.projects import router as projects_router
 from app.api.routes.work_items import router as work_items_router
+from app.api.routes.materials import router as materials_router
 
 
 app = FastAPI(title="Hubstar AI", docs_url="/docs")
 app.include_router(projects_router)
 app.include_router(work_items_router)
+app.include_router(materials_router)
 
 
 @app.get("/")
