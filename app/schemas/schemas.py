@@ -321,6 +321,27 @@ class WorkMaterialCreateRequest(BaseModel):
         return value
 
 
+class WorkMaterialUpdateRequest(BaseModel):
+    """Explicitly supplied mutable link fields only."""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    consumption_rate: Optional[float] = Field(default=None, ge=0)
+    waste_percentage: Optional[float] = Field(default=None, ge=0)
+    approved_quantity: Optional[float] = Field(default=None, ge=0)
+    status: Optional[StatusEnum] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_patch(cls, data):
+        if isinstance(data, dict):
+            if not data:
+                raise ValueError("at least one field is required")
+            for field in ("consumption_rate", "waste_percentage", "status"):
+                if field in data and data[field] is None:
+                    raise ValueError(f"{field} must not be null")
+        return data
+
+
 class WorkMaterialPublicResponse(BaseModel):
     """Linked material response without internal database identifiers."""
 

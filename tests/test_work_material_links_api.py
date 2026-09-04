@@ -70,6 +70,91 @@ def create_link(client, project="PRJ-1", work="WRK-1", **overrides):
     return client.post(url(project, work), json=payload)
 
 
+def test_patch_flow_and_summary(client, db_session):
+    _, work, _ = seed(db_session, price=2)
+    work.labor_total = 100
+    db_session.commit()
+    assert create_link(client, status="NEEDS_REVIEW").status_code == 201
+    endpoint = url() + "/MAT-1"
+    response = client.patch(endpoint, json={"consumption_rate": 2})
+    assert response.status_code == 200
+    assert response.json()["calculated_quantity"] == 20
+    assert response.json()["status"] == "NEEDS_REVIEW"
+    assert db_session.query(WorkMaterialLink).one().calculated_quantity == 20
+    response = client.patch(endpoint, json={"waste_percentage": 10})
+    assert response.json()["calculated_quantity"] == 22
+    assert response.json()["consumption_rate"] == 2
+    for approved, effective, total in [(7.7777, 7.778, 15.56), (0, 0, 0), (None, 22, 44)]:
+        response = client.patch(endpoint, json={"approved_quantity": approved})
+        assert response.status_code == 200
+        assert response.json()["effective_quantity"] == effective
+        assert response.json()["material_total"] == total
+        summary = client.get("/api/v1/projects/PRJ-1/work-items/WRK-1/summary").json()
+        assert summary["material_subtotal_known"] == total
+    response = client.patch(endpoint, json={"status": "ACTIVE"})
+    assert response.status_code == 200
+    assert response.json()["calculated_quantity"] == 22
+    assert not {"id", "work_id", "project_id"}.intersection(response.json())
+    summary = client.get("/api/v1/projects/PRJ-1/work-items/WRK-1/summary").json()
+    assert summary["needs_review_count"] == 0
+    assert summary["subtotal_known_before_vat"] == 144
+
+
+@pytest.mark.parametrize("payload", [
+    {}, {"consumption_rate": None}, {"waste_percentage": None},
+    {"status": None}, {"status": "INVALID"},
+    *[{key: 1} for key in ("id", "project_id", "work_id", "material_id",
+       "calculated_quantity", "effective_quantity", "material_total", "unit_price", "unknown")],
+    *[{key: value} for key in ("consumption_rate", "waste_percentage", "approved_quantity")
+      for value in (-1, "NaN", "Infinity", "-Infinity")],
+])
+def test_patch_invalid_payload(client, db_session, payload):
+    seed(db_session)
+    create_link(client)
+    assert client.patch(url() + "/MAT-1", json=payload).status_code == 422
+
+
+def test_patch_not_found_and_ownership(client, db_session):
+    seed(db_session)
+    db_session.add(Project(project_id="PRJ-2", name="Other"))
+    db_session.commit()
+    for endpoint in (url("UNKNOWN") + "/MAT-1", url(work="UNKNOWN") + "/MAT-1",
+                     url() + "/UNKNOWN", url() + "/MAT-1", url("PRJ-2") + "/MAT-1"):
+        assert client.patch(endpoint, json={"status": "ACTIVE"}).status_code == 404
+
+
+def test_patch_missing_price_and_work_quantity(client, db_session):
+    _, work, _ = seed(db_session)
+    create_link(client)
+    response = client.patch(url() + "/MAT-1", json={"consumption_rate": 2})
+    assert response.status_code == 200
+    assert response.json()["material_total"] is None
+    work.quantity = None
+    db_session.commit()
+    assert client.patch(url() + "/MAT-1", json={"consumption_rate": 3}).status_code == 422
+    assert db_session.query(WorkMaterialLink).one().consumption_rate == 2
+
+
+def test_patch_database_error_rolls_back(client, db_session, monkeypatch):
+    seed(db_session)
+    create_link(client)
+    calls = []
+    rollback = db_session.rollback
+    def tracked_rollback():
+        calls.append("rollback")
+        rollback()
+    monkeypatch.setattr(db_session, "rollback", tracked_rollback)
+    monkeypatch.setattr(db_session, "commit", lambda: (_ for _ in ()).throw(
+        OperationalError("UPDATE private SQL", {}, Exception("internal detail"))))
+    response = client.patch(url() + "/MAT-1", json={"consumption_rate": 3})
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Unable to update material link"}
+    assert calls == ["rollback"]
+    assert "private SQL" not in response.text
+    assert "internal detail" not in response.text
+    assert db_session.query(WorkMaterialLink).one().consumption_rate == 1
+
+
 def test_empty_link_list(client, db_session):
     seed(db_session)
     response = client.get(url())

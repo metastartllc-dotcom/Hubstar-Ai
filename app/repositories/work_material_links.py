@@ -4,7 +4,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.models.models import Material, Project, WorkItem, WorkMaterialLink
-from app.schemas.schemas import WorkMaterialCreateRequest
+from app.schemas.schemas import WorkMaterialCreateRequest, WorkMaterialUpdateRequest
 from app.services.material_calculator import (
     MaterialCalculationError,
     calculate_material_requirement,
@@ -25,6 +25,10 @@ class LinkedMaterialNotFoundError(Exception):
 
 class MissingWorkQuantityError(Exception):
     """Raised when a work item has no quantity for the calculation."""
+
+
+class WorkMaterialLinkNotFoundError(Exception):
+    """Raised when the material is not linked to the requested work."""
 
 
 class DuplicateWorkMaterialLinkError(Exception):
@@ -116,6 +120,49 @@ def list_materials_for_work(
     except SQLAlchemyError as exc:
         db.rollback()
         raise WorkMaterialLinkPersistenceError from exc
+
+
+def update_work_material_link(
+    db: Session,
+    project_id: str,
+    work_id: str,
+    material_id: str,
+    update: WorkMaterialUpdateRequest,
+) -> dict:
+    """Resolve ownership and validate the merged calculation before mutation."""
+    try:
+        _, work = _resolve_project_and_work(db, project_id, work_id)
+        material = _resolve_material(db, material_id)
+        link = db.query(WorkMaterialLink).filter(
+            WorkMaterialLink.work_id == work.id,
+            WorkMaterialLink.material_id == material.id,
+        ).first()
+        if link is None:
+            raise WorkMaterialLinkNotFoundError
+        if work.quantity is None:
+            raise MissingWorkQuantityError
+        values = update.model_dump(exclude_unset=True)
+        calculation = calculate_material_requirement(
+            work_quantity=work.quantity,
+            consumption_rate=values.get("consumption_rate", link.consumption_rate),
+            waste_percentage=values.get("waste_percentage", link.waste_percentage),
+            approved_quantity=values.get("approved_quantity", link.approved_quantity),
+            unit_price=material.unit_price,
+        )
+        for field, value in values.items():
+            setattr(link, field, value)
+        link.calculated_quantity = float(calculation.calculated_quantity)
+        db.commit()
+        db.refresh(link)
+        return _public_link(work, material, link)
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise WorkMaterialLinkPersistenceError from exc
+    except (LinkedProjectNotFoundError, LinkedWorkNotFoundError,
+            LinkedMaterialNotFoundError, WorkMaterialLinkNotFoundError,
+            MissingWorkQuantityError, MaterialCalculationError):
+        db.rollback()
+        raise
 
 
 def create_work_material_link(
