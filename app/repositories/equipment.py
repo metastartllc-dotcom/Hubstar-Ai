@@ -4,7 +4,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.models.models import Equipment
-from app.schemas.schemas import EquipmentCreateRequest
+from app.schemas.schemas import EquipmentCreateRequest, EquipmentUpdateRequest
 
 
 class DuplicateEquipmentIdError(Exception):
@@ -13,6 +13,37 @@ class DuplicateEquipmentIdError(Exception):
 
 class EquipmentPersistenceError(Exception):
     """An equipment database operation failed."""
+
+
+class EquipmentNotFoundError(Exception):
+    """External equipment ID is unknown."""
+
+
+class EquipmentValidationError(Exception):
+    """Merged equipment attributes violate the tariff contract."""
+
+
+def update_equipment(db: Session, equipment_id: str, update_data: EquipmentUpdateRequest) -> Equipment:
+    try:
+        equipment = _find(db, equipment_id)
+        if equipment is None:
+            raise EquipmentNotFoundError
+        values = update_data.model_dump(exclude_unset=True)
+        rate = values.get("unit_rate", equipment.unit_rate)
+        tariff = values.get("tariff_type", equipment.tariff_type)
+        if rate is not None and (tariff is None or not tariff.strip()):
+            raise EquipmentValidationError
+        for field, value in values.items():
+            setattr(equipment, field, value)
+        db.commit()
+        db.refresh(equipment)
+        return equipment
+    except (EquipmentNotFoundError, EquipmentValidationError):
+        db.rollback()
+        raise
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise EquipmentPersistenceError from exc
 
 
 def _find(db: Session, equipment_id: str) -> Equipment | None:

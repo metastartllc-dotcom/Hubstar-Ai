@@ -7,10 +7,24 @@ from app.core.database import get_db
 from app.repositories.equipment import (
     DuplicateEquipmentIdError, EquipmentPersistenceError,
     create_equipment, get_equipment_by_equipment_id, list_equipment,
+    update_equipment, EquipmentNotFoundError, EquipmentValidationError,
 )
-from app.schemas.schemas import EquipmentCreateRequest, EquipmentPublicResponse
+from app.schemas.schemas import EquipmentCreateRequest, EquipmentPublicResponse, EquipmentUpdateRequest
 
 router = APIRouter(prefix="/api/v1/equipment", tags=["equipment"])
+
+
+@router.patch("/{equipment_id}", response_model=EquipmentPublicResponse)
+def patch_equipment(equipment_id: str, request: EquipmentUpdateRequest,
+                    db: Annotated[Session, Depends(get_db)]):
+    try:
+        return update_equipment(db, equipment_id, request)
+    except EquipmentNotFoundError as exc:
+        raise HTTPException(404, "Equipment not found") from exc
+    except EquipmentValidationError as exc:
+        raise HTTPException(422, "tariff_type is required when unit_rate is provided") from exc
+    except EquipmentPersistenceError as exc:
+        raise HTTPException(500, "Unable to update equipment") from exc
 
 
 @router.get("", response_model=list[EquipmentPublicResponse])

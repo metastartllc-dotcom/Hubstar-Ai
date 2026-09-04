@@ -512,6 +512,44 @@ class EquipmentCreateRequest(BaseModel):
         return self
 
 
+class EquipmentUpdateRequest(BaseModel):
+    """Only explicitly supplied mutable equipment attributes are updated."""
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    type: Optional[str] = None
+    master_id: Optional[str] = None
+    model: Optional[str] = None
+    capacity: Optional[str] = None
+    location: Optional[str] = None
+    tariff_type: Optional[str] = None
+    availability: Optional[str] = None
+    operator_included: Optional[StrictBool] = None
+    fuel_included: Optional[StrictBool] = None
+    delivery_included: Optional[StrictBool] = None
+    unit_rate: Optional[float] = Field(default=None, ge=0)
+    status: Optional[StatusEnum] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def require_update(cls, data):
+        if isinstance(data, dict):
+            if not data:
+                raise ValueError("at least one field is required")
+            for field in ("type", "status"):
+                if field in data and data[field] is None:
+                    raise ValueError(f"{field} must not be null")
+        return data
+
+    @field_validator("type", "master_id", "model", "capacity", "location",
+                     "tariff_type", "availability", mode="before")
+    @classmethod
+    def trim_strings(cls, value):
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                raise ValueError("must not be empty")
+        return value
+
+
 class EquipmentPublicResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     equipment_id: str
