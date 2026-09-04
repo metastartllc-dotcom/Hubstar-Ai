@@ -57,7 +57,9 @@ def summarize_work_budget(
         material_total = None
         if effective_quantity is not None and material.unit_price is not None:
             material_total = _money(
-                Decimal(str(effective_quantity)) * Decimal(str(material.unit_price))
+                Decimal(str(effective_quantity)).quantize(
+                    Decimal("0.001"), rounding=ROUND_HALF_UP
+                ) * Decimal(str(material.unit_price))
             )
         if material.unit_price is None or material_total is None:
             missing_ids.append(material.material_id)

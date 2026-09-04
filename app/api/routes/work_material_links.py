@@ -15,8 +15,10 @@ from app.repositories.work_material_links import (
     WorkMaterialLinkPersistenceError,
     create_work_material_link,
     list_materials_for_work,
+    update_work_material_link,
+    WorkMaterialLinkNotFoundError,
 )
-from app.schemas.schemas import WorkMaterialCreateRequest, WorkMaterialPublicResponse
+from app.schemas.schemas import WorkMaterialCreateRequest, WorkMaterialPublicResponse, WorkMaterialUpdateRequest
 from app.services.material_calculator import MaterialCalculationError
 
 
@@ -31,9 +33,30 @@ def _raise_not_found(exc: Exception) -> None:
         detail = "Project not found"
     elif isinstance(exc, LinkedWorkNotFoundError):
         detail = "Work item not found"
+    elif isinstance(exc, WorkMaterialLinkNotFoundError):
+        detail = "Material link not found"
     else:
         detail = "Material not found"
     raise HTTPException(status_code=404, detail=detail) from exc
+
+
+@router.patch("/{material_id}", response_model=WorkMaterialPublicResponse)
+def patch_work_material(
+    project_id: str,
+    work_id: str,
+    material_id: str,
+    update: WorkMaterialUpdateRequest,
+    db: Annotated[Session, Depends(get_db)],
+) -> WorkMaterialPublicResponse:
+    try:
+        return update_work_material_link(db, project_id, work_id, material_id, update)
+    except (LinkedProjectNotFoundError, LinkedWorkNotFoundError,
+            LinkedMaterialNotFoundError, WorkMaterialLinkNotFoundError) as exc:
+        _raise_not_found(exc)
+    except (MissingWorkQuantityError, MaterialCalculationError) as exc:
+        raise HTTPException(status_code=422, detail="Invalid material calculation") from exc
+    except WorkMaterialLinkPersistenceError as exc:
+        raise HTTPException(status_code=500, detail="Unable to update material link") from exc
 
 
 @router.get("", response_model=list[WorkMaterialPublicResponse])

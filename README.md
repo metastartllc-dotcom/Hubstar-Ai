@@ -202,6 +202,27 @@ price snapshot болон price history-г дараагийн шатанд нэ�
 single-writer хэрэглээнд тохирно. Public эсвэл multi-user deployment хийхийн өмнө
 composite unique migration болон authentication заавал нэмнэ.
 
+## Ажлын материалын холбоос шинэчлэх
+
+`PATCH /api/v1/projects/{project_id}/work-items/{work_id}/materials/{material_id}`
+руу зөвхөн өөрчлөх утгаа явуулна:
+
+```json
+{
+  "consumption_rate": 1.1,
+  "waste_percentage": 5,
+  "approved_quantity": null,
+  "status": "ACTIVE"
+}
+```
+
+`approved_quantity=null` нь override-ийг арилгаж calculated quantity руу буцаана.
+`calculated_quantity`, `effective_quantity`, `material_total`, үнэ болон ID-уудыг
+client өөрчилж болохгүй. Сервер quantity-г 3, мөнгийг 2 орноор ROUND_HALF_UP
+тооцно. Link price snapshot хадгалахгүй; одоогийн Material үнэ ашиглана.
+Энэ write endpoint нь local-development-only, authentication-гүй public deployment
+хийхгүй.
+
 ## Нэг ажлын мэдэгдэж буй төсвийн summary
 
 ```text
