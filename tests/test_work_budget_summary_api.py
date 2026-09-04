@@ -90,7 +90,7 @@ def add_link(
     link = WorkMaterialLink(
         work_id=work.id,
         material_id=material.id,
-        consumption_rate=1,
+        consumption_rate=calculated / work.quantity,
         waste_percentage=0,
         calculated_quantity=calculated,
         approved_quantity=approved,

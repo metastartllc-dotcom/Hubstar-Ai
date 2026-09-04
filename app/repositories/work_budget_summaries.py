@@ -4,6 +4,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.models.models import Material, Project, WorkItem, WorkMaterialLink
+from app.services.material_calculator import current_calculated_quantity
 from app.services.work_budget_summary import (
     MaterialBudgetInput,
     summarize_work_budget,
@@ -41,7 +42,10 @@ def get_work_budget_summary(db: Session, project_id: str, work_id: str) -> dict:
         inputs = [
             MaterialBudgetInput(
                 material_id=material.material_id,
-                calculated_quantity=link.calculated_quantity,
+                calculated_quantity=current_calculated_quantity(
+                    work.quantity, link.consumption_rate, link.waste_percentage,
+                    link.calculated_quantity,
+                ),
                 approved_quantity=link.approved_quantity,
                 unit_price=material.unit_price,
                 link_status=link.status.value,

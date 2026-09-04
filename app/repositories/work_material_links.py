@@ -65,8 +65,6 @@ def _public_link(
     material: Material,
     link: WorkMaterialLink,
 ) -> dict:
-    if work.quantity is None:
-        raise MissingWorkQuantityError
     calculation = calculate_material_requirement(
         work_quantity=work.quantity,
         consumption_rate=link.consumption_rate,
@@ -82,9 +80,11 @@ def _public_link(
         "unit_price": material.unit_price,
         "consumption_rate": link.consumption_rate,
         "waste_percentage": link.waste_percentage,
-        "calculated_quantity": float(calculation.calculated_quantity),
+        "calculated_quantity": (float(calculation.calculated_quantity)
+                                if calculation.calculated_quantity is not None else None),
         "approved_quantity": link.approved_quantity,
-        "effective_quantity": float(calculation.effective_quantity),
+        "effective_quantity": (float(calculation.effective_quantity)
+                               if calculation.effective_quantity is not None else None),
         "material_total": (
             float(calculation.material_total)
             if calculation.material_total is not None

@@ -283,3 +283,32 @@ Material холбоогүй ажлыг одоогоор INCOMPLETE гэж үзэ
 болон no_materials_work_ids-д тусгана. Энэ count нь incomplete_work_count-ийн subset.
 Одоогийн model-д labor-only/material-not-required баталгаажуулалтын field байхгүй;
 ирээдүйд ийм тусгай field нэмсний дараа энэ дүрэм өөрчлөгдөж болно.
+
+## Ажлын мэдээллийг хэсэгчлэн шинэчлэх
+
+`PATCH /api/v1/projects/{project_id}/work-items/{work_id}`:
+
+```json
+{"quantity": 20}
+```
+
+Зөвшөөрөх талбар: name, wbs_code, unit, quantity, labor_unit_rate, status.
+Ирүүлээгүй талбар хэвээр; project_id, work_id, id, labor_total өөрчлөхгүй.
+name/status null байж болохгүй. quantity/labor_unit_rate null нь тодорхойгүй,
+0 нь бодит тэг утга. Аль нэг нь null бол labor_total=null байна.
+PATCH response internal id агуулахгүй; existing GET/POST contract хэвээр.
+wbs_code/unit-ийг null-аар цэвэрлэж болно. String trim, unit normalization,
+finite non-negative тооны validation үйлчилнэ.
+
+Quantity өөрчлөгдөхөд материалын хэрэгцээ link GET, work summary болон project
+budget summary дээр одоогийн нормоор автоматаар дахин тооцогдоно. Link table-д
+PATCH нь тооцоолсон дүн, price snapshot бичихгүй. Нормгүй хуучин link-ийн summary
+хадгалсан хэмжээг ашиглах compatibility дүрэмтэй.
+Quantity null бол calculated_quantity=null; approved override байхгүй үед
+effective_quantity/material_total мөн null. Override (0 ч гэсэн) байгаа бол
+үнэ мэдэгдэж байгаа үед түүнээр total тооцно. Хөдөлмөр тодорхойгүй тул summary
+бүрэн төсөв болохгүй. Link create/update-ийн quantity шаардлага хэвээр.
+approved_quantity өгөгдсөн (0 ч гэсэн) бол effective quantity-ийн override хэвээр.
+Материалын нийт үнэ одоогийн Material.unit_price-аар бодогдоно.
+Quantity/rate өөрчлөгдөхөд labor_total Decimal ROUND_HALF_UP, 2 орноор бодогдоно.
+Authentication нэмэгдэх хүртэл write API зөвхөн local development-д ашиглана.
