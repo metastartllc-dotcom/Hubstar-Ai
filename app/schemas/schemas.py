@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 from typing import Literal, Optional, List
 from datetime import date, datetime
 from decimal import Decimal
@@ -475,6 +475,58 @@ class ProjectBudgetSummaryResponse(BaseModel):
     missing_price_links: List[BudgetLinkReference]
     needs_review_links: List[BudgetLinkReference]
     works: List[ProjectBudgetWorkResponse]
+
+
+class EquipmentCreateRequest(BaseModel):
+    """Public equipment master input, independent of generic import schemas."""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    equipment_id: str
+    type: str
+    master_id: Optional[str] = None
+    model: Optional[str] = None
+    capacity: Optional[str] = None
+    location: Optional[str] = None
+    tariff_type: Optional[str] = None
+    availability: Optional[str] = None
+    operator_included: Optional[StrictBool] = None
+    fuel_included: Optional[StrictBool] = None
+    delivery_included: Optional[StrictBool] = None
+    unit_rate: Optional[float] = Field(default=None, ge=0)
+    status: StatusEnum = StatusEnum.ACTIVE
+
+    @field_validator("equipment_id", "type", "master_id", "model", "capacity",
+                     "location", "tariff_type", "availability", mode="before")
+    @classmethod
+    def trim_strings(cls, value):
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                raise ValueError("must not be empty")
+        return value
+
+    @model_validator(mode="after")
+    def require_tariff_for_rate(self):
+        if self.unit_rate is not None and self.tariff_type is None:
+            raise ValueError("tariff_type is required when unit_rate is provided")
+        return self
+
+
+class EquipmentPublicResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    equipment_id: str
+    type: Optional[str] = None
+    master_id: Optional[str] = None
+    model: Optional[str] = None
+    capacity: Optional[str] = None
+    location: Optional[str] = None
+    tariff_type: Optional[str] = None
+    availability: Optional[str] = None
+    operator_included: Optional[bool] = None
+    fuel_included: Optional[bool] = None
+    delivery_included: Optional[bool] = None
+    unit_rate: Optional[float] = None
+    status: StatusEnum
 
 
 class EquipmentBase(BaseModel):

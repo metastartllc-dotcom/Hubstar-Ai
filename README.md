@@ -312,3 +312,47 @@ approved_quantity өгөгдсөн (0 ч гэсэн) бол effective quantity-�
 Материалын нийт үнэ одоогийн Material.unit_price-аар бодогдоно.
 Quantity/rate өөрчлөгдөхөд labor_total Decimal ROUND_HALF_UP, 2 орноор бодогдоно.
 Authentication нэмэгдэх хүртэл write API зөвхөн local development-д ашиглана.
+
+## Equipment Master API
+
+`GET /api/v1/equipment`, `GET /api/v1/equipment/{equipment_id}`,
+`POST /api/v1/equipment` — жагсаалт offset>=0, limit=1–100.
+
+Минимал POST жишээ (зөвхөн development жишээ):
+
+```json
+{"equipment_id": "EXAMPLE-EQ-001", "type": "Кран"}
+```
+
+Бүрэн POST жишээ (бодит үнэ/техникийн үзүүлэлт биш):
+
+```json
+{
+  "equipment_id": "EXAMPLE-EQ-002",
+  "type": "Кран",
+  "master_id": "EXAMPLE-MASTER",
+  "model": "Жишээ загвар",
+  "capacity": "Жишээ хүчин чадал",
+  "location": "Жишээ байршил",
+  "operator_included": true,
+  "fuel_included": false,
+  "delivery_included": null,
+  "tariff_type": "цаг",
+  "unit_rate": 100000,
+  "availability": "Баталгаажуулах",
+  "status": "NEEDS_REVIEW"
+}
+```
+
+equipment_id global unique external ID; type нь model дахь төрөл/нэрийн public
+талбар. capacity одоогоор string. Internal id request/response-д ашиглахгүй.
+Inclusion flag: true=тарифт орсон, false=ороогүй нь баталгаатай,
+null/omitted=мэдээлэл тодорхойгүй. String/integer boolean coercion хориглоно.
+unit_rate finite, >=0; null=тодорхойгүй. Тоон unit_rate (0 ч гэсэн) байвал
+tariff_type заавал өгнө. Тарифын нэгжийн enum шинээр тогтоогоогүй.
+Энэ API нийт зардал тооцохгүй, WorkItem-тай холбоогүй тул summary-д нөлөөлөхгүй.
+Authentication нэмэгдэх хүртэл write API зөвхөн local development-д ашиглана.
+
+Гурван inclusion flag-ийн ORM default=False арилсан; omitted/null SQL NULL
+хадгална. Column name/type/nullable хэвээр, database-level DEFAULT байгаагүй
+тул migration шаардахгүй. Generic schema-ийн contract өөрчлөгдөөгүй.
