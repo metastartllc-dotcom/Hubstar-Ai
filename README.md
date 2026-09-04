@@ -253,3 +253,33 @@ GET /api/v1/projects/PRJ-ALTAI-R7-B/work-items/PRJ-ALTAI-R7-B-WRK-001/summary
 гэж ашиглаж болохгүй. Энэ endpoint-д НӨАТ, тээвэр, тоног төхөөрөмж болон historical
 price snapshot хараахан ороогүй. Material master-ийн одоогийн үнэ өөрчлөгдвөл
 summary мөн шинэ үнээр дахин тооцогдоно.
+
+## Төслийн мэдэгдэж буй төсвийн summary
+
+`GET /api/v1/projects/{project_id}/budget-summary` нь дараагийн dashboard-ийн
+data source болно. Жишээ response-ийн үндсэн хэсэг:
+
+```json
+{
+  "project_id": "PRJ-ALTAI-R7-B",
+  "work_item_count": 1,
+  "labor_subtotal_known": 255000000,
+  "material_subtotal_known": 71145000,
+  "subtotal_known_before_vat": 326145000,
+  "missing_price_link_count": 4,
+  "needs_review_link_count": 1,
+  "pricing_status": "INCOMPLETE"
+}
+```
+
+`subtotal_known_before_vat` нь зөвхөн мэдэгдэж буй хэсэг. `INCOMPLETE` үед бүрэн
+төсөв гэж ашиглахгүй. VAT, transport, equipment, historical price snapshot ороогүй.
+Нэг material олон ажилд хэрэглэгдсэн бол link occurrence бүрийн зардлыг тооцно;
+өөр нэгжтэй quantity-г нийлбэрлэхгүй. Work/link дараалал тогтвортой байна.
+Complete/incomplete/needs-review work counts нь харилцан үл давхцах ангилал;
+үнэ дутуу бөгөөд review-тай ажил incomplete-д тоологдоно, review flags/pairs хэвээр.
+Ажилгүй төсөл NO_WORK_ITEMS, is_pricing_complete=false байна.
+Material холбоогүй ажлыг одоогоор INCOMPLETE гэж үзэж, no_materials_work_count
+болон no_materials_work_ids-д тусгана. Энэ count нь incomplete_work_count-ийн subset.
+Одоогийн model-д labor-only/material-not-required баталгаажуулалтын field байхгүй;
+ирээдүйд ийм тусгай field нэмсний дараа энэ дүрэм өөрчлөгдөж болно.

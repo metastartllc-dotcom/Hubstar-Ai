@@ -385,6 +385,50 @@ class WorkBudgetSummaryResponse(BaseModel):
     warnings: List[str]
 
 
+class BudgetLinkReference(BaseModel):
+    work_id: str
+    material_id: str
+
+
+class ProjectBudgetWorkResponse(BaseModel):
+    work_id: str
+    name: str
+    unit: Optional[str] = None
+    quantity: Optional[float] = None
+    labor_total: Optional[float] = None
+    material_subtotal_known: float
+    subtotal_known_before_vat: float
+    missing_price_count: int
+    needs_review_count: int
+    pricing_status: Literal["NO_MATERIALS", "COMPLETE", "INCOMPLETE", "NEEDS_REVIEW"]
+
+
+class ProjectBudgetSummaryResponse(BaseModel):
+    project_id: str
+    name: str
+    work_item_count: int
+    complete_work_count: int
+    incomplete_work_count: int
+    needs_review_work_count: int
+    missing_labor_work_count: int
+    no_materials_work_count: int
+    no_materials_work_ids: List[str]
+    material_link_count: int
+    priced_material_link_count: int
+    missing_price_link_count: int
+    needs_review_link_count: int
+    labor_subtotal_known: float
+    material_subtotal_known: float
+    subtotal_known_before_vat: float
+    is_pricing_complete: bool
+    has_review_warnings: bool
+    pricing_status: Literal["NO_WORK_ITEMS", "COMPLETE", "INCOMPLETE", "NEEDS_REVIEW"]
+    missing_labor_work_ids: List[str]
+    missing_price_links: List[BudgetLinkReference]
+    needs_review_links: List[BudgetLinkReference]
+    works: List[ProjectBudgetWorkResponse]
+
+
 class EquipmentBase(BaseModel):
     equipment_id: Optional[str] = None
     master_id: Optional[str] = None
