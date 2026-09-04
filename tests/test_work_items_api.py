@@ -279,3 +279,181 @@ def test_created_work_item_is_visible_via_get(client, db_session):
     response = client.get("/api/v1/projects/PRJ-001/work-items")
     assert response.status_code == 200
     assert [item["work_id"] for item in response.json()] == ["PRJ-001-WRK-001"]
+
+
+PATCH_URL = "/api/v1/projects/PRJ-001/work-items/PRJ-001-WRK-001"
+
+
+def test_patch_partial_trim_and_get(client, db_session):
+    add_project(db_session)
+    original = create_work(client, quantity=10, labor_unit_rate=2).json()
+    r = client.patch(PATCH_URL, json={"name": "  Updated  "})
+    assert r.status_code == 200
+    assert r.json() == {**{k: v for k, v in original.items() if k != "id"}, "name": "Updated"}
+    assert "id" not in r.json() and "project_id" not in r.json()
+    assert client.get("/api/v1/projects/PRJ-001/work-items").json() == [{**original, "name": "Updated"}]
+    r = client.patch(PATCH_URL, json={"unit": " m2 ", "wbs_code": " 1.2 ", "status": "VALID"})
+    assert r.json()["unit"] == "м²"
+    assert r.json()["wbs_code"] == "1.2"
+    assert r.json()["status"] == "VALID"
+    assert client.patch(PATCH_URL, json={"unit": " custom "}).json()["unit"] == "custom"
+    r = client.patch(PATCH_URL, json={"unit": None, "wbs_code": None})
+    assert r.json()["unit"] is None and r.json()["wbs_code"] is None
+
+
+@pytest.mark.parametrize("payload,total", [
+    ({"quantity": 10.005}, 20.01), ({"labor_unit_rate": 1.005}, 10.05),
+    ({"quantity": 0}, 0), ({"labor_unit_rate": 0}, 0),
+])
+def test_patch_labor_rounding(client, db_session, payload, total):
+    add_project(db_session)
+    create_work(client, quantity=10, labor_unit_rate=2)
+    r = client.patch(PATCH_URL, json=payload)
+    assert r.status_code == 200
+    assert r.json()["labor_total"] == total
+
+
+@pytest.mark.parametrize("payload", [
+    {}, *[{f: 1} for f in ("id", "work_id", "project_id", "labor_total", "unknown")],
+    *[{"name": v} for v in (None, "", "  ")],
+    *[{"status": v} for v in (None, "INVALID")],
+    *[{f: v} for f in ("quantity", "labor_unit_rate")
+      for v in (-1, "NaN", "Infinity", "-Infinity")],
+    {"unit": " "}, {"wbs_code": " "},
+])
+def test_patch_validation(client, db_session, payload):
+    add_project(db_session)
+    original = create_work(client).json()
+    assert client.patch(PATCH_URL, json=payload).status_code == 422
+    assert client.get("/api/v1/projects/PRJ-001/work-items").json() == [original]
+
+
+def test_patch_ownership(client, db_session):
+    add_project(db_session)
+    add_project(db_session, "OTHER")
+    create_work(client)
+    for url in (PATCH_URL.replace("projects/PRJ-001", "projects/MISSING"),
+                PATCH_URL.replace("projects/PRJ-001", "projects/OTHER"),
+                PATCH_URL + "-MISSING"):
+        assert client.patch(url, json={"quantity": 3}).status_code == 404
+
+
+@pytest.mark.parametrize("failure", ["query", "commit", "refresh"])
+def test_patch_database_failure(client, db_session, monkeypatch, failure):
+    add_project(db_session)
+    create_work(client, quantity=10)
+    events = []
+    rollback = db_session.rollback
+    def fail(*args, **kwargs):
+        events.append("error")
+        raise OperationalError("secret SQL", {}, Exception("internal detail"))
+    def tracked_rollback():
+        events.append("rollback")
+        rollback()
+    with monkeypatch.context() as patch:
+        patch.setattr(db_session, failure, fail)
+        patch.setattr(db_session, "rollback", tracked_rollback)
+        r = client.patch(PATCH_URL, json={"quantity": 3})
+    assert r.status_code == 500
+    assert r.json() == {"detail": "Unable to update work item"}
+    assert events == ["error", "rollback"]
+    assert client.get("/api/v1/projects/PRJ-001/work-items").status_code == 200
+
+
+def test_patch_recalculates_links_and_both_summaries_without_link_writes(client, db_session):
+    from app.models.models import WorkMaterialLink
+    add_project(db_session)
+    assert create_work(client, quantity=10, labor_unit_rate=2).status_code == 201
+    link_url = PATCH_URL + "/materials"
+    for material_id, approved in (("M1", None), ("M2", 7), ("M3", 0)):
+        assert client.post("/api/v1/materials", json={
+            "material_id": material_id, "name": material_id, "unit_price": 3,
+        }).status_code == 201
+        assert client.post(link_url, json={
+            "material_id": material_id, "consumption_rate": 2,
+            "waste_percentage": 10, "approved_quantity": approved,
+        }).status_code == 201
+    before = [(l.id, l.calculated_quantity, l.approved_quantity)
+              for l in db_session.query(WorkMaterialLink).order_by(WorkMaterialLink.id)]
+    r = client.patch(PATCH_URL, json={"quantity": 20})
+    assert r.status_code == 200 and r.json()["labor_total"] == 40
+    links = client.get(link_url).json()
+    assert [l["calculated_quantity"] for l in links] == [44, 44, 44]
+    assert [l["effective_quantity"] for l in links] == [44, 7, 0]
+    assert [l["material_total"] for l in links] == [132, 21, 0]
+    for url in (PATCH_URL + "/summary", "/api/v1/projects/PRJ-001/budget-summary"):
+        r = client.get(url)
+        assert r.status_code == 200
+        assert r.json()["material_subtotal_known"] == 153
+        assert r.json()["subtotal_known_before_vat"] == 193
+        assert r.json()["pricing_status"] == "COMPLETE"
+    db_session.expire_all()
+    after = [(l.id, l.calculated_quantity, l.approved_quantity)
+             for l in db_session.query(WorkMaterialLink).order_by(WorkMaterialLink.id)]
+    assert before == after
+
+
+@pytest.mark.parametrize("payload", [
+    {"quantity": None}, {"labor_unit_rate": None},
+    {"quantity": None, "labor_unit_rate": None},
+])
+def test_nullable_create_and_patch(client, db_session, payload):
+    add_project(db_session)
+    created = create_work(client, **payload)
+    assert created.status_code == 201 and created.json()["labor_total"] is None
+    assert "id" in created.json()
+    assert client.patch(PATCH_URL, json={"quantity": 3, "labor_unit_rate": 2}).json()["labor_total"] == 6
+    r = client.patch(PATCH_URL, json=payload)
+    assert r.status_code == 200 and r.json()["labor_total"] is None
+    assert "id" not in r.json() and "project_id" not in r.json()
+
+
+def test_patch_openapi_public_response(client):
+    spec = client.get("/openapi.json").json()
+    operation = spec["paths"]["/api/v1/projects/{project_id}/work-items/{work_id}"]["patch"]
+    ref = operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].split("/")[-1]
+    fields = spec["components"]["schemas"][ref]["properties"]
+    assert set(fields) == {"work_id", "name", "wbs_code", "unit", "quantity", "labor_unit_rate", "labor_total", "status"}
+    assert "id" in spec["components"]["schemas"]["ProjectWorkItemResponse"]["properties"]
+
+
+def test_null_quantity_link_and_summary_runtime(client, db_session):
+    from app.models.models import WorkMaterialLink
+    add_project(db_session)
+    create_work(client, quantity=10, labor_unit_rate=2)
+    link_url = PATCH_URL + "/materials"
+    for mid, approved, price in (("M1", None, 3), ("M2", 0, 3), ("M3", 7, 3), ("M4", 7, None)):
+        assert client.post("/api/v1/materials", json={"material_id": mid, "name": mid, "unit_price": price}).status_code == 201
+        assert client.post(link_url, json={"material_id": mid, "consumption_rate": 2, "approved_quantity": approved}).status_code == 201
+    def persisted():
+        return [(l.id, l.work_id, l.material_id, l.consumption_rate, l.waste_percentage,
+                 l.calculated_quantity, l.approved_quantity, l.status)
+                for l in db_session.query(WorkMaterialLink).order_by(WorkMaterialLink.id)]
+    before = persisted()
+    assert client.patch(PATCH_URL, json={"quantity": None}).status_code == 200
+    response = client.get(link_url)
+    assert response.status_code == 200
+    links = response.json()
+    assert [l["material_id"] for l in links] == ["M1", "M2", "M3", "M4"]
+    assert [l["calculated_quantity"] for l in links] == [None] * 4
+    assert [l["effective_quantity"] for l in links] == [None, 0, 7, 7]
+    assert [l["material_total"] for l in links] == [None, 0, 21, None]
+    for url in (PATCH_URL + "/summary", "/api/v1/projects/PRJ-001/budget-summary"):
+        body = client.get(url).json()
+        assert body["pricing_status"] == "INCOMPLETE"
+        assert body["material_subtotal_known"] == 21
+        assert body["subtotal_known_before_vat"] == 21
+    project = client.get("/api/v1/projects/PRJ-001/budget-summary").json()
+    assert project["missing_labor_work_ids"] == ["PRJ-001-WRK-001"]
+    assert project["incomplete_work_count"] == 1
+    # Restore quantity while clearing the rate: materials remain calculable.
+    assert client.patch(PATCH_URL, json={"quantity": 20, "labor_unit_rate": None}).json()["labor_total"] is None
+    assert client.get(link_url).json()[0]["calculated_quantity"] == 40
+    assert client.get(PATCH_URL + "/summary").json()["pricing_status"] == "INCOMPLETE"
+    assert client.patch(PATCH_URL, json={"labor_unit_rate": 2}).json()["labor_total"] == 40
+    assert client.get(PATCH_URL + "/summary").json()["subtotal_known_before_vat"] == 181
+    assert client.get("/api/v1/projects/PRJ-001/budget-summary").json()["subtotal_known_before_vat"] == 181
+    assert client.patch(PATCH_URL, json={"quantity": 0}).json()["labor_total"] == 0
+    assert client.get(link_url).json()[0]["calculated_quantity"] == 0
+    db_session.expire_all()
+    assert persisted() == before

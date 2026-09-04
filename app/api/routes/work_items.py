@@ -11,14 +11,29 @@ from app.repositories.work_items import (
     WorkItemPersistenceError,
     create_work_item,
     list_work_items_for_project,
+    update_work_item,
 )
-from app.schemas.schemas import ProjectWorkItemCreate, ProjectWorkItemResponse
+from app.schemas.schemas import ProjectWorkItemCreate, ProjectWorkItemResponse, WorkItemUpdateRequest, WorkItemPatchResponse
 
 
 router = APIRouter(
     prefix="/api/v1/projects/{project_id}/work-items",
     tags=["work-items"],
 )
+
+
+@router.patch("/{work_id}", response_model=WorkItemPatchResponse)
+def patch_project_work_item(
+    project_id: str, work_id: str, update: WorkItemUpdateRequest,
+    db: Annotated[Session, Depends(get_db)],
+) -> WorkItemPatchResponse:
+    try:
+        work = update_work_item(db, project_id, work_id, update)
+    except WorkItemPersistenceError as exc:
+        raise HTTPException(500, detail="Unable to update work item") from exc
+    if work is None:
+        raise HTTPException(404, detail="Project or work item not found")
+    return work
 
 
 @router.get("", response_model=list[ProjectWorkItemResponse])

@@ -147,6 +147,54 @@ class ProjectWorkItemCreate(BaseModel):
             return UnitNormalizer.normalize(value)
         return value
 
+class WorkItemUpdateRequest(BaseModel):
+    """Only mutable work attributes; omitted values remain unchanged."""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    name: Optional[str] = None
+    wbs_code: Optional[str] = None
+    unit: Optional[str] = None
+    quantity: Optional[float] = Field(default=None, ge=0)
+    labor_unit_rate: Optional[float] = Field(default=None, ge=0)
+    status: Optional[StatusEnum] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def require_values(cls, data):
+        if isinstance(data, dict):
+            if not data:
+                raise ValueError("at least one field is required")
+            for field in ("name", "status"):
+                if field in data and data[field] is None:
+                    raise ValueError(f"{field} must not be null")
+        return data
+
+    @field_validator("name", "wbs_code", "unit", mode="before")
+    @classmethod
+    def trim_strings(cls, value, info):
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                raise ValueError("must not be empty")
+            if info.field_name == "unit":
+                return UnitNormalizer.normalize(value)
+        return value
+
+
+class WorkItemPatchResponse(BaseModel):
+    """Public PATCH result, independent of the legacy GET/POST contract."""
+
+    model_config = ConfigDict(from_attributes=True)
+    work_id: str
+    name: str
+    wbs_code: Optional[str] = None
+    unit: Optional[str] = None
+    quantity: Optional[float] = None
+    labor_unit_rate: Optional[float] = None
+    labor_total: Optional[float] = None
+    status: StatusEnum
+
+
 class ProjectWorkItemResponse(BaseModel):
     """Work item response without the internal project foreign key."""
 
@@ -352,9 +400,9 @@ class WorkMaterialPublicResponse(BaseModel):
     unit_price: Optional[float] = None
     consumption_rate: float
     waste_percentage: float
-    calculated_quantity: float
+    calculated_quantity: Optional[float]
     approved_quantity: Optional[float] = None
-    effective_quantity: float
+    effective_quantity: Optional[float]
     material_total: Optional[float] = None
     status: StatusEnum
 

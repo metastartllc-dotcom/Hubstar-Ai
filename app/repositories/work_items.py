@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models.models import WorkItem
 from app.repositories.projects import get_project_by_project_id
-from app.schemas.schemas import ProjectWorkItemCreate
+from app.schemas.schemas import ProjectWorkItemCreate, WorkItemUpdateRequest
 
 
 class DuplicateWorkIdError(Exception):
@@ -16,6 +16,32 @@ class DuplicateWorkIdError(Exception):
 
 class WorkItemPersistenceError(Exception):
     """Raised when a work item database operation fails."""
+
+
+def update_work_item(db: Session, project_id: str, work_id: str,
+                     update: WorkItemUpdateRequest) -> WorkItem | None:
+    """Update one owned work item without modifying material links."""
+    try:
+        project = get_project_by_project_id(db, project_id)
+        if project is None:
+            return None
+        work = get_work_item_by_work_id(db, work_id)
+        if work is None or work.project_id != project.id:
+            return None
+        values = update.model_dump(exclude_unset=True)
+        if "quantity" in values or "labor_unit_rate" in values:
+            values["labor_total"] = _calculate_labor_total(
+                values.get("quantity", work.quantity),
+                values.get("labor_unit_rate", work.labor_unit_rate),
+            )
+        for field, value in values.items():
+            setattr(work, field, value)
+        db.commit()
+        db.refresh(work)
+        return work
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise WorkItemPersistenceError from exc
 
 
 def get_work_item_by_work_id(db: Session, work_id: str) -> WorkItem | None:

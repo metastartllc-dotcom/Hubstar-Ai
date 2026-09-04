@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.models.models import Project, WorkItem, Material, WorkMaterialLink
 from app.services.work_budget_summary import MaterialBudgetInput
+from app.services.material_calculator import current_calculated_quantity
 from app.services.project_budget_summary import ProjectWorkBudgetInput, summarize_project_budget
 
 
@@ -31,10 +32,14 @@ def get_project_budget_summary(db: Session, project_id: str) -> dict:
                 .order_by(WorkItem.id, WorkMaterialLink.id).all()
             )
             grouped = {work.id: [] for work in works}
+            work_by_id = {work.id: work for work in works}
             for link, material in rows:
                 grouped[link.work_id].append(MaterialBudgetInput(
                     material_id=material.material_id,
-                    calculated_quantity=link.calculated_quantity,
+                    calculated_quantity=current_calculated_quantity(
+                        work_by_id[link.work_id].quantity, link.consumption_rate,
+                        link.waste_percentage, link.calculated_quantity,
+                    ),
                     approved_quantity=link.approved_quantity,
                     unit_price=material.unit_price,
                     link_status=link.status.value,

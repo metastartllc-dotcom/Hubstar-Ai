@@ -14,8 +14,8 @@ class MaterialCalculationError(ValueError):
 
 @dataclass(frozen=True)
 class MaterialCalculation:
-    calculated_quantity: Decimal
-    effective_quantity: Decimal
+    calculated_quantity: Decimal | None
+    effective_quantity: Decimal | None
     material_total: Decimal | None
 
 
@@ -35,11 +35,11 @@ def calculate_material_requirement(
     unit_price: object | None = None,
 ) -> MaterialCalculation:
     """Calculate rounded required quantity, effective quantity, and total cost."""
-    work = _non_negative_decimal(work_quantity, "work_quantity")
+    work = None if work_quantity is None else _non_negative_decimal(work_quantity, "work_quantity")
     rate = _non_negative_decimal(consumption_rate, "consumption_rate")
     waste = _non_negative_decimal(waste_percentage, "waste_percentage")
 
-    calculated = (work * rate * (Decimal("1") + waste / Decimal("100"))).quantize(
+    calculated = None if work is None else (work * rate * (Decimal("1") + waste / Decimal("100"))).quantize(
         QUANTITY_PLACES,
         rounding=ROUND_HALF_UP,
     )
@@ -52,7 +52,7 @@ def calculate_material_requirement(
         else calculated
     )
     total = None
-    if unit_price is not None:
+    if unit_price is not None and effective is not None:
         price = _non_negative_decimal(unit_price, "unit_price")
         total = (effective * price).quantize(MONEY_PLACES, rounding=ROUND_HALF_UP)
 
@@ -61,3 +61,17 @@ def calculate_material_requirement(
         effective_quantity=effective,
         material_total=total,
     )
+
+
+def current_calculated_quantity(work_quantity, consumption_rate, waste_percentage,
+                                stored_quantity):
+    """Recalculate norm-based links; retain legacy quantities without a norm."""
+    if work_quantity is None:
+        return None
+    if consumption_rate is None:
+        return stored_quantity
+    return calculate_material_requirement(
+        work_quantity=work_quantity,
+        consumption_rate=consumption_rate,
+        waste_percentage=0 if waste_percentage is None else waste_percentage,
+    ).calculated_quantity
