@@ -356,3 +356,25 @@ Authentication нэмэгдэх хүртэл write API зөвхөн local develo
 Гурван inclusion flag-ийн ORM default=False арилсан; omitted/null SQL NULL
 хадгална. Column name/type/nullable хэвээр, database-level DEFAULT байгаагүй
 тул migration шаардахгүй. Generic schema-ийн contract өөрчлөгдөөгүй.
+
+### Equipment хэсэгчлэн шинэчлэх
+
+`PATCH /api/v1/equipment/{equipment_id}` — equipment_id immutable; ирүүлээгүй
+талбар хэвээр. Минимал жишээ:
+
+```json
+{"type": "Кран"}
+```
+
+Nullable утга цэвэрлэх жишээ:
+
+```json
+{"unit_rate": null, "tariff_type": null, "location": null}
+```
+
+Payload болон хадгалсан утгыг нийлүүлж шалгана: unit_rate тоон (0 ч гэсэн)
+бол tariff_type заавал байна. Тарифыг дангаар null болгох бол үнэ null байх ёстой.
+Inclusion flag true=орсон, false=ороогүй нь баталгаатай, null=тодорхойгүй;
+зөвхөн JSON boolean/null зөвшөөрнө. Type/status null зөвшөөрөхгүй.
+Equipment WorkItem-тай холбоогүй тул PATCH нь work/project summary-д нөлөөлөхгүй,
+нийт equipment cost тооцохгүй. Authentication нэмэгдэх хүртэл local-development-only.

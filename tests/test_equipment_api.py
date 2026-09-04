@@ -197,3 +197,108 @@ def test_equipment_does_not_change_summaries(context):
     before = [client.get(u).json() for u in urls]
     assert post(client, unit_rate=100, tariff_type="hour").status_code == 201
     assert [client.get(u).json() for u in urls] == before
+    assert client.patch(URL + "/E", json={"unit_rate": 200}).status_code == 200
+    assert [client.get(u).json() for u in urls] == before
+
+
+def test_patch_runtime_partial_and_cross_field(context):
+    db, client = context
+    original = post(client).json()
+    r = client.patch(URL + "/E", json={"type": " Loader ", "unit_rate": 10, "tariff_type": " hour "})
+    assert r.status_code == 200
+    assert r.json() == {**original, "type": "Loader", "unit_rate": 10, "tariff_type": "hour"}
+    for flag in FLAGS:
+        for value in (None, False, True):
+            r = client.patch(URL + "/E", json={flag: value})
+            assert r.status_code == 200 and r.json()[flag] is value
+            db.expire_all()
+            assert getattr(db.query(Equipment).one(), flag) is value
+    assert client.patch(URL + "/E", json={"unit_rate": 0}).json()["unit_rate"] == 0
+    before = client.get(URL + "/E").json()
+    assert client.patch(URL + "/E", json={"type": "Must not persist", "tariff_type": None}).status_code == 422
+    assert client.get(URL + "/E").json() == before
+    assert client.patch(URL + "/E", json={"tariff_type": "day"}).json()["unit_rate"] == 0
+    assert client.patch(URL + "/E", json={"tariff_type": None, "unit_rate": None}).status_code == 200
+    before = client.get(URL + "/E").json()
+    assert client.patch(URL + "/E", json={"unit_rate": 0}).status_code == 422
+    assert client.get(URL + "/E").json() == before
+    assert client.patch(URL + "/E", json={"tariff_type": "hour"}).status_code == 200
+    assert client.patch(URL + "/E", json={"unit_rate": 25}).json()["unit_rate"] == 25
+    assert client.patch(URL + "/E", json={"unit_rate": None}).json()["unit_rate"] is None
+    assert client.patch(URL + "/MISSING", json={"type": "X"}).status_code == 404
+
+
+@pytest.mark.parametrize("field", STRINGS)
+def test_patch_optional_strings(context, field):
+    _, client = context
+    post(client)
+    r = client.patch(URL + "/E", json={field: " text "})
+    assert r.status_code == 200 and r.json()[field] == "text"
+    assert client.patch(URL + "/E", json={field: " "}).status_code == 422
+    assert client.patch(URL + "/E", json={field: None}).json()[field] is None
+
+
+@pytest.mark.parametrize("payload", [
+    {}, *[{"type": v} for v in (None, "", " ")],
+    *[{"status": v} for v in (None, "INVALID")],
+    *[{f: 1} for f in ("id", "equipment_id", "project_id", "work_id", "supplier_id", "usage_quantity", "total", "total_cost", "unknown")],
+    *[{"unit_rate": v} for v in (-1, "NaN", "Infinity", "-Infinity")],
+    *[{f: v} for f in FLAGS for v in ("true", "false", 1, 0)],
+])
+def test_patch_invalid(context, payload):
+    _, client = context
+    before = post(client).json()
+    assert client.patch(URL + "/E", json=payload).status_code == 422
+    assert client.get(URL + "/E").json() == before
+
+
+@pytest.mark.parametrize("method", ["query", "commit", "refresh"])
+def test_patch_database_errors(context, monkeypatch, method):
+    db, client = context
+    post(client)
+    calls = []
+    rollback = db.rollback
+    def fail(*args, **kwargs):
+        raise OperationalError("SECRET SQL", {}, Exception("internal"))
+    def roll():
+        calls.append("rollback")
+        rollback()
+    with monkeypatch.context() as m:
+        m.setattr(db, method, fail)
+        m.setattr(db, "rollback", roll)
+        r = client.patch(URL + "/E", json={"type": "Updated"})
+    assert r.status_code == 500 and r.json() == {"detail": "Unable to update equipment"}
+    assert calls == ["rollback"]
+    assert client.patch(URL + "/E", json={"status": "VALID"}).status_code == 200
+
+
+def test_patch_openapi(context):
+    spec = context[1].get("/openapi.json").json()
+    operation = spec["paths"][URL + "/{equipment_id}"]["patch"]
+    assert operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith("/EquipmentPublicResponse")
+    fields = spec["components"]["schemas"]["EquipmentUpdateRequest"]["properties"]
+    assert set(fields) == {"type", "unit_rate", "status", *FLAGS, *STRINGS}
+
+
+def test_invalid_patch_leaves_no_dirty_state_or_autoflush(context):
+    from sqlalchemy import event
+    db, client = context
+    before = post(client, unit_rate=10, tariff_type="hour").json()
+    flushed = []
+    def on_flush(*args):
+        flushed.append(True)
+    event.listen(db, "before_flush", on_flush)
+    try:
+        r = client.patch(URL + "/E", json={"type": "Invalid change", "tariff_type": None})
+        assert r.status_code == 422
+        assert not db.dirty and not db.new and not db.deleted
+        stored = db.query(Equipment).filter_by(equipment_id="E").one()
+        assert stored.type == before["type"] and stored.tariff_type == "hour"
+        db.commit()
+        assert not flushed
+        assert client.get(URL + "/E").json() == before
+    finally:
+        event.remove(db, "before_flush", on_flush)
+    assert client.patch(URL + "/E", json={"type": "Valid change"}).status_code == 200
+    assert client.get(URL + "/E").json()["type"] == "Valid change"
+    assert not db.dirty and not db.new and not db.deleted
