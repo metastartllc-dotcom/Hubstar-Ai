@@ -378,3 +378,31 @@ Inclusion flag true=орсон, false=ороогүй нь баталгаатай
 зөвхөн JSON boolean/null зөвшөөрнө. Type/status null зөвшөөрөхгүй.
 Equipment WorkItem-тай холбоогүй тул PATCH нь work/project summary-д нөлөөлөхгүй,
 нийт equipment cost тооцохгүй. Authentication нэмэгдэх хүртэл local-development-only.
+
+### Equipment хүргэлтийн багтсан зай ба migration
+
+`included_delivery_one_way_distance_km` нь тарифт багтсан **нэг талын** км;
+жишээ нь 25 км-ийг 50 болгон хадгалахгүй. null=тодорхойгүй, 0=бодит тэг.
+Тоон зай өгөхөд effective `delivery_included=true` байна. Flag-ийг false/null
+болгох бол persisted зайг ижил PATCH-д null болгож цэвэрлэнэ.
+
+Migration-ийг API/import автоматаар ажиллуулахгүй. Серверийг зогсоож, database
+backup авсны дараа explicit ажиллуулна:
+
+```powershell
+.\.venv\Scripts\python.exe -m alembic upgrade head
+```
+
+Fresh хоосон database-д repository root-оос эхлээд schema үүсгээд, дараа нь
+revision state-г head болгоно:
+
+```powershell
+.\.venv\Scripts\python.exe -m app.core.init_db
+.\.venv\Scripts\python.exe -m alembic upgrade head
+```
+
+`equipments` table байхгүй бол migration нь success гэж тэмдэглэхгүй, дээрх
+`init_db` командыг заасан ойлгомжтой алдаатай зогсоно.
+
+Upgrade-ийн дараа schema, count, өгөгдлийг шалгана. Production downgrade-г
+автоматаар хийхгүй; зөвхөн шалгасан сэргээх төлөвлөгөөгөөр ажиллуулна.

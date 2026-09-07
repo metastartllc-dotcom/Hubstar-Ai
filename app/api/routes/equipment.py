@@ -22,7 +22,7 @@ def patch_equipment(equipment_id: str, request: EquipmentUpdateRequest,
     except EquipmentNotFoundError as exc:
         raise HTTPException(404, "Equipment not found") from exc
     except EquipmentValidationError as exc:
-        raise HTTPException(422, "tariff_type is required when unit_rate is provided") from exc
+        raise HTTPException(422, "Equipment fields are inconsistent") from exc
     except EquipmentPersistenceError as exc:
         raise HTTPException(500, "Unable to update equipment") from exc
 

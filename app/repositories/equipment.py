@@ -31,7 +31,11 @@ def update_equipment(db: Session, equipment_id: str, update_data: EquipmentUpdat
         values = update_data.model_dump(exclude_unset=True)
         rate = values.get("unit_rate", equipment.unit_rate)
         tariff = values.get("tariff_type", equipment.tariff_type)
+        delivery = values.get("delivery_included", equipment.delivery_included)
+        distance = values.get("included_delivery_one_way_distance_km", equipment.included_delivery_one_way_distance_km)
         if rate is not None and (tariff is None or not tariff.strip()):
+            raise EquipmentValidationError
+        if distance is not None and delivery is not True:
             raise EquipmentValidationError
         for field, value in values.items():
             setattr(equipment, field, value)

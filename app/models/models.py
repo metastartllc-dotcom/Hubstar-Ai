@@ -87,6 +87,7 @@ class Equipment(Base):
     operator_included = Column(Boolean)
     fuel_included = Column(Boolean)
     delivery_included = Column(Boolean)
+    included_delivery_one_way_distance_km = Column(Float, nullable=True, default=None)
     tariff_type = Column(String)
     unit_rate = Column(Float)
     availability = Column(String)
