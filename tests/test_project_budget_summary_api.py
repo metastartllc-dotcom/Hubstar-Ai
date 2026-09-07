@@ -6,7 +6,7 @@ from sqlalchemy.pool import StaticPool
 from sqlalchemy.exc import OperationalError
 from app.api.main import app
 from app.core.database import Base, get_db
-from app.models.models import Project, WorkItem, Material, WorkMaterialLink
+from app.models.models import Equipment, Project, WorkEquipmentLink, WorkItem, Material, WorkMaterialLink
 
 URL = "/api/v1/projects/P/budget-summary"
 
@@ -57,6 +57,17 @@ def link(db, w, m, quantity=10, approved=None, status="ACTIVE"):
     db.commit()
 
 
+def equipment(db, external="E", rate=150000):
+    value = Equipment(equipment_id=external, type="Crane", unit_rate=rate, tariff_type="MNT/hour")
+    db.add(value); db.commit(); return value
+
+
+def equipment_link(db, w, e, usage=72, rate=150000, status="ACTIVE"):
+    db.add(WorkEquipmentLink(work_item_id=w.id, equipment_id=e.id, usage_quantity=usage,
+                             agreed_unit_rate=rate, tariff_type_snapshot="MNT/hour", status=status))
+    db.commit()
+
+
 def test_unknown_and_empty(context):
     db, client = context
     assert client.get(URL).status_code == 404
@@ -87,7 +98,7 @@ def test_complete_shared_material_and_bounded_queries(context, count):
         event.remove(db.bind, "before_cursor_execute", capture)
     assert r.status_code == 200
     b = r.json()
-    assert len(statements) == 3
+    assert len(statements) == 4
     assert all(s.lstrip().upper().startswith("SELECT") for s in statements)
     assert b["pricing_status"] == "COMPLETE"
     assert b["complete_work_count"] == count
@@ -98,6 +109,72 @@ def test_complete_shared_material_and_bounded_queries(context, count):
     assert [w["work_id"] for w in b["works"]] == [f"W-{i}" for i in range(count)]
     assert "id" not in b and all("id" not in w for w in b["works"])
     assert "quantity" not in b
+    assert b["equipment_link_count"] == 0 and b["equipment_subtotal_known"] == 0
+
+
+def test_equipment_occurrences_snapshot_and_project_subtotal(context):
+    db, client = context
+    p = project(db); crane = equipment(db)
+    for name in ("W2", "W1"):
+        w = work(db, p, name, labor=100); m = material(db, "M-" + name, price=2)
+        link(db, w, m); equipment_link(db, w, crane)
+    body = client.get(URL).json()
+    assert body["equipment_link_count"] == 2
+    assert body["priced_equipment_link_count"] == 2
+    assert body["equipment_subtotal_known"] == 21600000
+    assert body["subtotal_known_before_vat"] == 21600240
+    assert [w["work_id"] for w in body["works"]] == ["W2", "W1"]
+    assert body["equipment_link_count"] == sum(w["equipment_link_count"] for w in body["works"])
+    assert body["priced_equipment_link_count"] == sum(w["priced_equipment_link_count"] for w in body["works"])
+    assert body["equipment_subtotal_known"] == sum(w["equipment_subtotal_known"] for w in body["works"])
+    assert body["subtotal_known_before_vat"] == sum(w["subtotal_known_before_vat"] for w in body["works"])
+    crane.unit_rate = 200000; db.commit()
+    assert client.get(URL).json()["equipment_subtotal_known"] == 21600000
+
+
+def test_equipment_missing_review_excluded_pairs_and_priority(context):
+    db, client = context
+    p = project(db); w1 = work(db, p, "W1"); w2 = work(db, p, "W2")
+    for w in (w1, w2): link(db, w, material(db, "M-" + w.work_id, 1))
+    e1, e2, e3 = equipment(db, "E1"), equipment(db, "E2"), equipment(db, "E3")
+    equipment_link(db, w1, e1, rate=None, status="NEEDS_REVIEW")
+    equipment_link(db, w1, e2, rate=10, status="REJECTED")
+    equipment_link(db, w2, e1, rate=None)
+    equipment_link(db, w2, e3, rate=10, status="ACTIVE_WITH_WARNINGS")
+    body = client.get(URL).json()
+    assert body["pricing_status"] == "INCOMPLETE"
+    assert body["missing_equipment_rate_pairs"] == [{"work_id":"W1","equipment_id":"E1"},{"work_id":"W2","equipment_id":"E1"}]
+    assert body["needs_review_equipment_pairs"] == [{"work_id":"W1","equipment_id":"E1"},{"work_id":"W2","equipment_id":"E3"}]
+    assert body["excluded_equipment_pairs"] == [{"work_id":"W1","equipment_id":"E2"}]
+    assert body["warnings"][0] == "Missing equipment rate: W1 / E1"
+    assert body["equipment_link_count"] == (body["priced_equipment_link_count"] +
+        body["missing_equipment_rate_link_count"] + body["excluded_equipment_link_count"])
+    assert all(len(body[name]) == len({(x["work_id"], x["equipment_id"]) for x in body[name]})
+               for name in ("missing_equipment_rate_pairs", "needs_review_equipment_pairs", "excluded_equipment_pairs"))
+
+
+def test_all_equipment_excluded_is_not_missing(context):
+    db, client = context
+    p = project(db); w = work(db, p); link(db, w, material(db))
+    equipment_link(db, w, equipment(db), rate=None, status="SUPERSEDED")
+    body = client.get(URL).json()
+    assert body["equipment_link_count"] == 1
+    assert body["excluded_equipment_link_count"] == 1
+    assert body["missing_equipment_rate_link_count"] == 0
+    assert body["equipment_subtotal_known"] == 0
+
+
+def test_project_equipment_query_count_is_fixed(context):
+    db, client = context
+    p = project(db); crane = equipment(db)
+    for i in range(3):
+        w = work(db, p, f"W{i}"); link(db, w, material(db, f"M{i}")); equipment_link(db, w, crane)
+    statements=[]
+    def capture(conn, cursor, statement, *args): statements.append(statement)
+    event.listen(db.bind, "before_cursor_execute", capture)
+    try: assert client.get(URL).status_code == 200
+    finally: event.remove(db.bind, "before_cursor_execute", capture)
+    assert len(statements) == 4
 
 
 @pytest.mark.parametrize("labor,price,review,expected", [

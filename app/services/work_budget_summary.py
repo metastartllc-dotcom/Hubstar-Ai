@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
+from app.services.equipment_calculator import calculate_equipment_total
 
 
 MONEY_PLACES = Decimal("0.01")
@@ -18,6 +19,14 @@ class MaterialBudgetInput:
 
 
 @dataclass(frozen=True)
+class EquipmentBudgetInput:
+    equipment_id: str
+    usage_quantity: object
+    agreed_unit_rate: object | None
+    link_status: str
+
+
+@dataclass(frozen=True)
 class WorkBudgetTotals:
     material_link_count: int
     priced_material_count: int
@@ -31,6 +40,15 @@ class WorkBudgetTotals:
     missing_price_material_ids: list[str]
     needs_review_material_ids: list[str]
     warnings: list[str]
+    equipment_link_count: int
+    priced_equipment_link_count: int
+    missing_equipment_rate_link_count: int
+    needs_review_equipment_link_count: int
+    excluded_equipment_link_count: int
+    equipment_subtotal_known: Decimal
+    missing_equipment_rate_ids: list[str]
+    needs_review_equipment_ids: list[str]
+    excluded_equipment_ids: list[str]
 
 
 def _money(value: object) -> Decimal:
@@ -40,6 +58,7 @@ def _money(value: object) -> Decimal:
 def summarize_work_budget(
     labor_total: object | None,
     materials: list[MaterialBudgetInput],
+    equipment: list[EquipmentBudgetInput] | None = None,
 ) -> WorkBudgetTotals:
     """Aggregate only known monetary amounts without combining quantities."""
     material_subtotal = Decimal("0.00")
@@ -47,6 +66,7 @@ def summarize_work_budget(
     review_ids: list[str] = []
     warnings: list[str] = []
     priced_count = 0
+    equipment = equipment or []
 
     for material in materials:
         effective_quantity = (
@@ -75,16 +95,39 @@ def summarize_work_budget(
             review_ids.append(material.material_id)
             warnings.append(f"Material needs review: {material.material_id}")
 
+    equipment_subtotal = Decimal("0.00")
+    equipment_priced = 0
+    equipment_missing: list[str] = []
+    equipment_review: list[str] = []
+    equipment_excluded: list[str] = []
+    for item in equipment:
+        if item.link_status in ("REJECTED", "SUPERSEDED"):
+            equipment_excluded.append(item.equipment_id)
+            warnings.append(f"Equipment excluded from budget: {item.equipment_id}")
+            continue
+        total = None
+        if item.agreed_unit_rate is not None:
+            total = calculate_equipment_total(item.usage_quantity, item.agreed_unit_rate)
+        if total is None:
+            equipment_missing.append(item.equipment_id)
+            warnings.append(f"Missing equipment rate: {item.equipment_id}")
+        else:
+            equipment_priced += 1
+            equipment_subtotal += total
+        if item.link_status in ("NEEDS_REVIEW", "ACTIVE_WITH_WARNINGS"):
+            equipment_review.append(item.equipment_id)
+            warnings.append(f"Equipment needs review: {item.equipment_id}")
+
     labor_known = labor_total is not None
     if not labor_known:
         warnings.insert(0, "Labor total is unavailable")
-    subtotal = material_subtotal
+    subtotal = material_subtotal + equipment_subtotal
     if labor_known:
         subtotal += _money(labor_total)
 
-    pricing_complete = labor_known and not missing_ids
-    has_review_warnings = bool(review_ids)
-    if not materials:
+    pricing_complete = labor_known and not missing_ids and not equipment_missing
+    has_review_warnings = bool(review_ids or equipment_review or equipment_excluded)
+    if not materials and not equipment_missing:
         pricing_status = "NO_MATERIALS"
     elif not pricing_complete:
         pricing_status = "INCOMPLETE"
@@ -110,4 +153,13 @@ def summarize_work_budget(
         missing_price_material_ids=missing_ids,
         needs_review_material_ids=review_ids,
         warnings=warnings,
+        equipment_link_count=len(equipment),
+        priced_equipment_link_count=equipment_priced,
+        missing_equipment_rate_link_count=len(equipment_missing),
+        needs_review_equipment_link_count=len(equipment_review),
+        excluded_equipment_link_count=len(equipment_excluded),
+        equipment_subtotal_known=equipment_subtotal.quantize(MONEY_PLACES, rounding=ROUND_HALF_UP),
+        missing_equipment_rate_ids=equipment_missing,
+        needs_review_equipment_ids=equipment_review,
+        excluded_equipment_ids=equipment_excluded,
     )

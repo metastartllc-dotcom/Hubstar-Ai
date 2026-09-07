@@ -3,10 +3,10 @@
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.models.models import Material, Project, WorkItem, WorkMaterialLink
+from app.models.models import Equipment, Material, Project, WorkEquipmentLink, WorkItem, WorkMaterialLink
 from app.services.material_calculator import current_calculated_quantity
 from app.services.work_budget_summary import (
-    MaterialBudgetInput,
+    EquipmentBudgetInput, MaterialBudgetInput,
     summarize_work_budget,
 )
 
@@ -53,7 +53,18 @@ def get_work_budget_summary(db: Session, project_id: str, work_id: str) -> dict:
             )
             for link, material in rows
         ]
-        totals = summarize_work_budget(work.labor_total, inputs)
+        equipment_rows = (
+            db.query(WorkEquipmentLink, Equipment.equipment_id)
+            .join(Equipment, Equipment.id == WorkEquipmentLink.equipment_id)
+            .filter(WorkEquipmentLink.work_item_id == work.id)
+            .order_by(WorkEquipmentLink.id).all()
+        )
+        equipment_inputs = [EquipmentBudgetInput(
+            equipment_id=equipment_id, usage_quantity=link.usage_quantity,
+            agreed_unit_rate=link.agreed_unit_rate,
+            link_status=link.status.value if link.status is not None else "ACTIVE",
+        ) for link, equipment_id in equipment_rows]
+        totals = summarize_work_budget(work.labor_total, inputs, equipment_inputs)
         return {
             "project_id": project.project_id,
             "work_id": work.work_id,
@@ -74,6 +85,15 @@ def get_work_budget_summary(db: Session, project_id: str, work_id: str) -> dict:
             "missing_price_material_ids": totals.missing_price_material_ids,
             "needs_review_material_ids": totals.needs_review_material_ids,
             "warnings": totals.warnings,
+            "equipment_link_count": totals.equipment_link_count,
+            "priced_equipment_link_count": totals.priced_equipment_link_count,
+            "missing_equipment_rate_link_count": totals.missing_equipment_rate_link_count,
+            "needs_review_equipment_link_count": totals.needs_review_equipment_link_count,
+            "excluded_equipment_link_count": totals.excluded_equipment_link_count,
+            "equipment_subtotal_known": float(totals.equipment_subtotal_known),
+            "missing_equipment_rate_ids": totals.missing_equipment_rate_ids,
+            "needs_review_equipment_ids": totals.needs_review_equipment_ids,
+            "excluded_equipment_ids": totals.excluded_equipment_ids,
         }
     except (SummaryProjectNotFoundError, SummaryWorkNotFoundError):
         raise

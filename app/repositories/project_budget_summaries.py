@@ -3,8 +3,8 @@
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.models.models import Project, WorkItem, Material, WorkMaterialLink
-from app.services.work_budget_summary import MaterialBudgetInput
+from app.models.models import Equipment, Project, WorkEquipmentLink, WorkItem, Material, WorkMaterialLink
+from app.services.work_budget_summary import EquipmentBudgetInput, MaterialBudgetInput
 from app.services.material_calculator import current_calculated_quantity
 from app.services.project_budget_summary import ProjectWorkBudgetInput, summarize_project_budget
 
@@ -32,6 +32,7 @@ def get_project_budget_summary(db: Session, project_id: str) -> dict:
                 .order_by(WorkItem.id, WorkMaterialLink.id).all()
             )
             grouped = {work.id: [] for work in works}
+            equipment_grouped = {work.id: [] for work in works}
             work_by_id = {work.id: work for work in works}
             for link, material in rows:
                 grouped[link.work_id].append(MaterialBudgetInput(
@@ -45,10 +46,24 @@ def get_project_budget_summary(db: Session, project_id: str) -> dict:
                     link_status=link.status.value,
                     material_status=material.status.value,
                 ))
+            equipment_rows = (
+                db.query(WorkEquipmentLink, Equipment.equipment_id)
+                .join(WorkItem, WorkItem.id == WorkEquipmentLink.work_item_id)
+                .join(Equipment, Equipment.id == WorkEquipmentLink.equipment_id)
+                .filter(WorkItem.project_id == project.id)
+                .order_by(WorkItem.id, WorkEquipmentLink.id).all()
+            )
+            for link, equipment_id in equipment_rows:
+                equipment_grouped[link.work_item_id].append(EquipmentBudgetInput(
+                    equipment_id=equipment_id,
+                    usage_quantity=link.usage_quantity,
+                    agreed_unit_rate=link.agreed_unit_rate,
+                    link_status=link.status.value if link.status is not None else "ACTIVE",
+                ))
             inputs = [ProjectWorkBudgetInput(
                 work_id=work.work_id, name=work.name, unit=work.unit,
                 quantity=work.quantity, labor_total=work.labor_total,
-                status=work.status.value, materials=grouped[work.id],
+                status=work.status.value, materials=grouped[work.id], equipment=equipment_grouped[work.id],
             ) for work in works]
             return {"project_id": project.project_id, "name": project.name,
                     **summarize_project_budget(inputs)}

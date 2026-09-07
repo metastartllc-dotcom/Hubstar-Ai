@@ -7,7 +7,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.api.main import app
 from app.core.database import Base, get_db
-from app.models.models import Material, Project, StatusEnum, WorkItem, WorkMaterialLink
+from app.models.models import Equipment, Material, Project, StatusEnum, WorkEquipmentLink, WorkItem, WorkMaterialLink
 
 
 @pytest.fixture()
@@ -101,6 +101,19 @@ def add_link(
     return material
 
 
+def add_equipment_link(db, work, external, *, rate=150000, usage=72,
+                       status=StatusEnum.ACTIVE, master_rate=None):
+    equipment = Equipment(equipment_id=external, type="Crane", unit_rate=rate if master_rate is None else master_rate,
+                          tariff_type="MNT/hour", operator_included=True, fuel_included=True,
+                          delivery_included=True, included_delivery_one_way_distance_km=25,
+                          status=StatusEnum.ACTIVE)
+    db.add(equipment); db.flush()
+    db.add(WorkEquipmentLink(work_item_id=work.id, equipment_id=equipment.id,
+                             usage_quantity=usage, agreed_unit_rate=rate,
+                             tariff_type_snapshot="MNT/hour", status=status))
+    db.commit(); return equipment
+
+
 def test_unknown_project_work_and_cross_project_are_404(client, db_session):
     seed_work(db_session)
     seed_work(db_session, project_id="PRJ-2", work_id="WRK-2")
@@ -117,6 +130,82 @@ def test_no_materials_is_no_materials(client, db_session):
     assert response.json()["material_link_count"] == 0
     assert response.json()["material_subtotal_known"] == 0.0
     assert response.json()["subtotal_known_before_vat"] == 100.0
+    assert response.json()["equipment_link_count"] == 0
+    assert response.json()["equipment_subtotal_known"] == 0
+    assert response.json()["missing_equipment_rate_ids"] == []
+
+
+def test_equipment_snapshot_subtotal_and_master_change(client, db_session):
+    _, work = seed_work(db_session, labor_total=255000000)
+    add_link(db_session, work, "MAT", price=7114500, calculated=10)
+    equipment = add_equipment_link(db_session, work, "CRANE")
+    body = client.get(summary_url()).json()
+    assert body["equipment_subtotal_known"] == 10800000
+    assert body["subtotal_known_before_vat"] == 336945000
+    assert body["priced_equipment_link_count"] == 1
+    equipment.unit_rate = 200000; equipment.operator_included = False
+    equipment.fuel_included = False; equipment.delivery_included = False
+    equipment.included_delivery_one_way_distance_km = None; db_session.commit()
+    assert client.get(summary_url()).json()["equipment_subtotal_known"] == 10800000
+    link = db_session.query(WorkEquipmentLink).one(); link.agreed_unit_rate = 200000; db_session.commit()
+    assert client.get(summary_url()).json()["equipment_subtotal_known"] == 14400000
+
+
+@pytest.mark.parametrize("rate,usage,status,pricing,priced,missing,review,excluded", [
+    (None, 1, StatusEnum.ACTIVE, "INCOMPLETE", 0, 1, 0, 0),
+    (None, 1, StatusEnum.NEEDS_REVIEW, "INCOMPLETE", 0, 1, 1, 0),
+    (None, 1, StatusEnum.ACTIVE_WITH_WARNINGS, "INCOMPLETE", 0, 1, 1, 0),
+    (0, 1, StatusEnum.ACTIVE, "COMPLETE", 1, 0, 0, 0),
+    (10, 0, StatusEnum.ACTIVE, "COMPLETE", 1, 0, 0, 0),
+    (10, 1, StatusEnum.NEEDS_REVIEW, "NEEDS_REVIEW", 1, 0, 1, 0),
+    (10, 1, StatusEnum.ACTIVE_WITH_WARNINGS, "NEEDS_REVIEW", 1, 0, 1, 0),
+    (10, 1, StatusEnum.REJECTED, "NEEDS_REVIEW", 0, 0, 0, 1),
+    (10, 1, StatusEnum.SUPERSEDED, "NEEDS_REVIEW", 0, 0, 0, 1),
+    (None, 1, StatusEnum.REJECTED, "NEEDS_REVIEW", 0, 0, 0, 1),
+])
+def test_equipment_status_price_and_zero_policy(client, db_session, rate, usage, status,
+                                                pricing, priced, missing, review, excluded):
+    _, work = seed_work(db_session)
+    add_link(db_session, work, "MAT", price=1, calculated=1)
+    add_equipment_link(db_session, work, "E", rate=rate, usage=usage, status=status)
+    body = client.get(summary_url()).json()
+    assert body["pricing_status"] == pricing
+    assert body["priced_equipment_link_count"] == priced
+    assert body["missing_equipment_rate_link_count"] == missing
+    assert body["needs_review_equipment_link_count"] == review
+    assert body["excluded_equipment_link_count"] == excluded
+    assert body["equipment_link_count"] == priced + missing + excluded
+
+
+def test_no_material_missing_equipment_cannot_be_hidden(client, db_session):
+    _, work = seed_work(db_session); add_equipment_link(db_session, work, "E", rate=None)
+    body = client.get(summary_url()).json()
+    assert body["pricing_status"] == "INCOMPLETE"
+    assert body["material_link_count"] == 0
+    assert body["missing_equipment_rate_link_count"] == 1
+    assert body["warnings"] == ["Missing equipment rate: E"]
+
+
+def test_multiple_equipment_decimal_totals_aggregate(client, db_session):
+    _, work = seed_work(db_session, labor_total=0); add_link(db_session, work, "MAT", price=0)
+    add_equipment_link(db_session, work, "E1", rate=2.345, usage=1)
+    add_equipment_link(db_session, work, "E2", rate=2.345, usage=1)
+    body = client.get(summary_url()).json()
+    assert body["priced_equipment_link_count"] == 2
+    assert body["equipment_subtotal_known"] == 4.70
+    assert body["equipment_link_count"] == 2
+
+
+def test_equipment_warning_order_and_public_ids(client, db_session):
+    _, work = seed_work(db_session); add_link(db_session, work, "MAT", price=1)
+    add_equipment_link(db_session, work, "E2", rate=None, status=StatusEnum.NEEDS_REVIEW)
+    add_equipment_link(db_session, work, "E1", status=StatusEnum.REJECTED)
+    body = client.get(summary_url()).json()
+    assert body["missing_equipment_rate_ids"] == ["E2"]
+    assert body["needs_review_equipment_ids"] == ["E2"]
+    assert body["excluded_equipment_ids"] == ["E1"]
+    assert body["warnings"][-3:] == ["Missing equipment rate: E2", "Equipment needs review: E2", "Equipment excluded from budget: E1"]
+    assert not any(key in body for key in ("work_item_id", "equipment_id", "id"))
 
 
 def test_complete_known_subtotals_and_internal_ids_hidden(client, db_session):

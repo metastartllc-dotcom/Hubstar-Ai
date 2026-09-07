@@ -432,11 +432,25 @@ class WorkBudgetSummaryResponse(BaseModel):
     missing_price_material_ids: List[str]
     needs_review_material_ids: List[str]
     warnings: List[str]
+    equipment_link_count: int
+    priced_equipment_link_count: int
+    missing_equipment_rate_link_count: int
+    needs_review_equipment_link_count: int
+    excluded_equipment_link_count: int
+    equipment_subtotal_known: float
+    missing_equipment_rate_ids: List[str]
+    needs_review_equipment_ids: List[str]
+    excluded_equipment_ids: List[str]
 
 
 class BudgetLinkReference(BaseModel):
     work_id: str
     material_id: str
+
+
+class BudgetEquipmentReference(BaseModel):
+    work_id: str
+    equipment_id: str
 
 
 class ProjectBudgetWorkResponse(BaseModel):
@@ -450,6 +464,12 @@ class ProjectBudgetWorkResponse(BaseModel):
     missing_price_count: int
     needs_review_count: int
     pricing_status: Literal["NO_MATERIALS", "COMPLETE", "INCOMPLETE", "NEEDS_REVIEW"]
+    equipment_subtotal_known: float
+    equipment_link_count: int
+    priced_equipment_link_count: int
+    missing_equipment_rate_link_count: int
+    needs_review_equipment_link_count: int
+    excluded_equipment_link_count: int
 
 
 class ProjectBudgetSummaryResponse(BaseModel):
@@ -475,6 +495,16 @@ class ProjectBudgetSummaryResponse(BaseModel):
     missing_labor_work_ids: List[str]
     missing_price_links: List[BudgetLinkReference]
     needs_review_links: List[BudgetLinkReference]
+    equipment_link_count: int
+    priced_equipment_link_count: int
+    missing_equipment_rate_link_count: int
+    needs_review_equipment_link_count: int
+    excluded_equipment_link_count: int
+    equipment_subtotal_known: float
+    missing_equipment_rate_pairs: List[BudgetEquipmentReference]
+    needs_review_equipment_pairs: List[BudgetEquipmentReference]
+    excluded_equipment_pairs: List[BudgetEquipmentReference]
+    warnings: List[str]
     works: List[ProjectBudgetWorkResponse]
 
 
