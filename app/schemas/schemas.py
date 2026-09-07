@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, field_validator, model_validator
 from typing import Literal, Optional, List
 from datetime import date, datetime
 from decimal import Decimal
@@ -492,6 +492,7 @@ class EquipmentCreateRequest(BaseModel):
     operator_included: Optional[StrictBool] = None
     fuel_included: Optional[StrictBool] = None
     delivery_included: Optional[StrictBool] = None
+    included_delivery_one_way_distance_km: Optional[StrictFloat | StrictInt] = Field(default=None, ge=0)
     unit_rate: Optional[float] = Field(default=None, ge=0)
     status: StatusEnum = StatusEnum.ACTIVE
 
@@ -509,6 +510,9 @@ class EquipmentCreateRequest(BaseModel):
     def require_tariff_for_rate(self):
         if self.unit_rate is not None and self.tariff_type is None:
             raise ValueError("tariff_type is required when unit_rate is provided")
+        if (self.included_delivery_one_way_distance_km is not None
+                and self.delivery_included is not True):
+            raise ValueError("delivery_included must be true when delivery distance is provided")
         return self
 
 
@@ -525,6 +529,7 @@ class EquipmentUpdateRequest(BaseModel):
     operator_included: Optional[StrictBool] = None
     fuel_included: Optional[StrictBool] = None
     delivery_included: Optional[StrictBool] = None
+    included_delivery_one_way_distance_km: Optional[StrictFloat | StrictInt] = Field(default=None, ge=0)
     unit_rate: Optional[float] = Field(default=None, ge=0)
     status: Optional[StatusEnum] = None
 
@@ -563,6 +568,7 @@ class EquipmentPublicResponse(BaseModel):
     operator_included: Optional[bool] = None
     fuel_included: Optional[bool] = None
     delivery_included: Optional[bool] = None
+    included_delivery_one_way_distance_km: Optional[float] = None
     unit_rate: Optional[float] = None
     status: StatusEnum
 

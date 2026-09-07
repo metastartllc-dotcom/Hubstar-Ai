@@ -12,6 +12,7 @@ from app.repositories import equipment as repository
 URL = "/api/v1/equipment"
 FLAGS = ("operator_included", "fuel_included", "delivery_included")
 STRINGS = ("master_id", "model", "capacity", "location", "tariff_type", "availability")
+DISTANCE = "included_delivery_one_way_distance_km"
 
 
 @pytest.fixture()
@@ -131,7 +132,7 @@ def test_forbidden(context, field):
 
 def test_openapi(context):
     spec = context[1].get("/openapi.json").json()
-    expected = {"equipment_id", "type", "unit_rate", "status", *FLAGS, *STRINGS}
+    expected = {"equipment_id", "type", "unit_rate", "status", DISTANCE, *FLAGS, *STRINGS}
     for name in ("EquipmentCreateRequest", "EquipmentPublicResponse"):
         assert set(spec["components"]["schemas"][name]["properties"]) == expected
 
@@ -277,7 +278,46 @@ def test_patch_openapi(context):
     operation = spec["paths"][URL + "/{equipment_id}"]["patch"]
     assert operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith("/EquipmentPublicResponse")
     fields = spec["components"]["schemas"]["EquipmentUpdateRequest"]["properties"]
-    assert set(fields) == {"type", "unit_rate", "status", *FLAGS, *STRINGS}
+    assert set(fields) == {"type", "unit_rate", "status", DISTANCE, *FLAGS, *STRINGS}
+
+
+@pytest.mark.parametrize("payload,status,distance", [
+    ({}, 201, None), ({DISTANCE: None}, 201, None),
+    ({"delivery_included": True, DISTANCE: None}, 201, None),
+    ({"delivery_included": True, DISTANCE: 0}, 201, 0),
+    ({"delivery_included": True, DISTANCE: 25}, 201, 25),
+    ({"delivery_included": False, DISTANCE: 25}, 422, None),
+    ({"delivery_included": None, DISTANCE: 25}, 422, None),
+    ({DISTANCE: 25}, 422, None),
+])
+def test_create_delivery_distance(context, payload, status, distance):
+    db, client = context
+    r = post(client, **payload)
+    assert r.status_code == status
+    if status == 201:
+        assert r.json()[DISTANCE] == distance
+        assert getattr(db.query(Equipment).one(), DISTANCE) == distance
+
+
+@pytest.mark.parametrize("value", [-1, "NaN", "Infinity", "-Infinity", "25"])
+def test_delivery_distance_rejects_invalid_and_strings(context, value):
+    assert post(context[1], delivery_included=True, **{DISTANCE: value}).status_code == 422
+
+
+def test_patch_delivery_distance_contract(context):
+    db, client = context
+    assert post(client, delivery_included=True, **{DISTANCE: 25}).status_code == 201
+    assert client.patch(URL + "/E", json={DISTANCE: 30}).json()[DISTANCE] == 30
+    before = client.get(URL + "/E").json()
+    assert client.patch(URL + "/E", json={"delivery_included": False}).status_code == 422
+    assert client.patch(URL + "/E", json={"delivery_included": None}).status_code == 422
+    assert client.get(URL + "/E").json() == before
+    assert not db.dirty and not db.new and not db.deleted
+    r = client.patch(URL + "/E", json={"delivery_included": False, DISTANCE: None})
+    assert r.status_code == 200 and r.json()[DISTANCE] is None
+    assert client.patch(URL + "/E", json={"delivery_included": True, DISTANCE: 25}).status_code == 200
+    r = client.patch(URL + "/E", json={"delivery_included": None, DISTANCE: None})
+    assert r.status_code == 200 and r.json()["delivery_included"] is None
 
 
 def test_invalid_patch_leaves_no_dirty_state_or_autoflush(context):
