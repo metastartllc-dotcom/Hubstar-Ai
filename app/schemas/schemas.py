@@ -3,6 +3,7 @@ from typing import Literal, Optional, List
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
+import math
 from app.models.models import StatusEnum
 from app.validators.units import UnitNormalizer
 
@@ -570,6 +571,84 @@ class EquipmentPublicResponse(BaseModel):
     delivery_included: Optional[bool] = None
     included_delivery_one_way_distance_km: Optional[float] = None
     unit_rate: Optional[float] = None
+    status: StatusEnum
+
+
+class WorkEquipmentCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    equipment_id: str
+    usage_quantity: StrictFloat | StrictInt = Field(ge=0)
+    status: StatusEnum = StatusEnum.ACTIVE
+
+    @field_validator("usage_quantity", mode="before")
+    @classmethod
+    def reject_non_finite(cls, value):
+        if isinstance(value, float) and not math.isfinite(value):
+            return "non-finite"
+        return value
+
+    @field_validator("equipment_id", mode="before")
+    @classmethod
+    def trim_equipment_id(cls, value):
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                raise ValueError("must not be empty")
+        return value
+
+
+class WorkEquipmentUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    usage_quantity: Optional[StrictFloat | StrictInt] = Field(default=None, ge=0)
+    agreed_unit_rate: Optional[StrictFloat | StrictInt] = Field(default=None, ge=0)
+    tariff_type: Optional[str] = None
+    operator_included: Optional[StrictBool] = None
+    fuel_included: Optional[StrictBool] = None
+    delivery_included: Optional[StrictBool] = None
+    included_delivery_one_way_distance_km: Optional[StrictFloat | StrictInt] = Field(default=None, ge=0)
+    status: Optional[StatusEnum] = None
+
+    @field_validator("usage_quantity", "agreed_unit_rate",
+                     "included_delivery_one_way_distance_km", mode="before")
+    @classmethod
+    def reject_non_finite(cls, value):
+        if isinstance(value, float) and not math.isfinite(value):
+            return "non-finite"
+        return value
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_payload(cls, data):
+        if isinstance(data, dict):
+            if not data:
+                raise ValueError("at least one field is required")
+            for field in ("usage_quantity", "status"):
+                if field in data and data[field] is None:
+                    raise ValueError(f"{field} must not be null")
+        return data
+
+    @field_validator("tariff_type", mode="before")
+    @classmethod
+    def trim_tariff(cls, value):
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                raise ValueError("must not be empty")
+        return value
+
+
+class WorkEquipmentPublicResponse(BaseModel):
+    equipment_id: str
+    type: Optional[str] = None
+    capacity: Optional[str] = None
+    usage_quantity: float
+    agreed_unit_rate: Optional[float] = None
+    tariff_type: Optional[str] = None
+    operator_included: Optional[bool] = None
+    fuel_included: Optional[bool] = None
+    delivery_included: Optional[bool] = None
+    included_delivery_one_way_distance_km: Optional[float] = None
+    equipment_total: Optional[float] = None
     status: StatusEnum
 
 

@@ -406,3 +406,35 @@ revision state-г head болгоно:
 
 Upgrade-ийн дараа schema, count, өгөгдлийг шалгана. Production downgrade-г
 автоматаар хийхгүй; зөвхөн шалгасан сэргээх төлөвлөгөөгөөр ажиллуулна.
+
+### WorkItem–Equipment snapshot холбоос
+
+```http
+GET /api/v1/projects/{project_id}/work-items/{work_id}/equipment
+POST /api/v1/projects/{project_id}/work-items/{work_id}/equipment
+PATCH /api/v1/projects/{project_id}/work-items/{work_id}/equipment/{equipment_id}
+```
+
+POST жишээ:
+
+```json
+{"equipment_id": "EQP-CRANE-25T-001", "usage_quantity": 72}
+```
+
+`usage_quantity` нь snapshot болсон `tariff_type`-ийн нэгжээр хэмжигдэнэ. Одоогийн
+краны хувьд 72 нь 72 цаг бөгөөд `72 × 150000 = 10800000 MNT`. Link үүсэхэд
+master-ийн agreed rate, tariff type, operator/fuel/delivery inclusion болон үнэд
+багтсан нэг талын 25 км-ийг яг тухайн үеийн утгаар snapshot болгоно. Master дараа
+өөрчлөгдсөн ч өмнөх link болон total өөрчлөгдөхгүй; зориуд шинэчлэхдээ link PATCH
+ашиглана.
+
+Response-ийн `type`, `capacity` нь одоогийн Equipment Master-ээс авдаг display
+мэдээлэл бөгөөд санхүүгийн snapshot биш. `REJECTED` болон `SUPERSEDED` master-ийг
+link хийхгүй. Master `NEEDS_REVIEW` эсвэл `ACTIVE_WITH_WARNINGS` байвал client-ийн
+ACTIVE status тухайн анхааруулгыг нууж бууруулахгүй.
+
+Нэг work/equipment pair нэг л холбоостой. Олон period эсвэл олон тарифтай occurrence
+дараагийн хувилбарт нэмэгдэнэ. Энэ branch work/project budget summary-д equipment
+subtotal хараахан нэмэхгүй. Migration зөвхөн explicit `python -m alembic upgrade head`
+командаар ажиллана. Write endpoint-ууд authentication нэмэгдэх хүртэл зөвхөн local
+development зориулалттай.
