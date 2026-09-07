@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Date, Boolean, Enum
+from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Date, Boolean, Enum, UniqueConstraint
 from sqlalchemy.orm import relationship
 import enum
 from decimal import Decimal
@@ -91,6 +91,21 @@ class Equipment(Base):
     tariff_type = Column(String)
     unit_rate = Column(Float)
     availability = Column(String)
+    status = Column(Enum(StatusEnum), default=StatusEnum.ACTIVE)
+
+class WorkEquipmentLink(Base):
+    __tablename__ = "work_equipment_links"
+    __table_args__ = (UniqueConstraint("work_item_id", "equipment_id", name="uq_work_equipment_link"),)
+    id = Column(Integer, primary_key=True, index=True)
+    work_item_id = Column(Integer, ForeignKey("work_items.id"), nullable=False, index=True)
+    equipment_id = Column(Integer, ForeignKey("equipments.id"), nullable=False, index=True)
+    usage_quantity = Column(Float, nullable=False)
+    agreed_unit_rate = Column(Float)
+    tariff_type_snapshot = Column(String)
+    operator_included_snapshot = Column(Boolean, default=None)
+    fuel_included_snapshot = Column(Boolean, default=None)
+    delivery_included_snapshot = Column(Boolean, default=None)
+    included_delivery_one_way_distance_km_snapshot = Column(Float)
     status = Column(Enum(StatusEnum), default=StatusEnum.ACTIVE)
 
 class Transport(Base):
