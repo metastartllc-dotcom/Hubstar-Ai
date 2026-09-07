@@ -438,3 +438,20 @@ ACTIVE status тухайн анхааруулгыг нууж бууруулах�
 subtotal хараахан нэмэхгүй. Migration зөвхөн explicit `python -m alembic upgrade head`
 командаар ажиллана. Write endpoint-ууд authentication нэмэгдэх хүртэл зөвхөн local
 development зориулалттай.
+
+Equipment snapshot зардал одоо work болон project budget summary-ийн мэдэгдэж буй
+subtotal-д орно. Summary нь Equipment Master-ийн одоогийн үнэ биш link-ийн
+`agreed_unit_rate` snapshot-ийг ашиглана. Иймээс master rate өөрчлөгдөхөд өмнөх
+budget өөрчлөгдөхгүй; link PATCH-аар тохиролцсон snapshot-ийг зориуд өөрчилбөл
+summary дахин тооцогдоно.
+
+Краны жишээнд `72 цаг × 150000 MNT/цаг = 10800000 MNT`; хөдөлмөр
+255000000, үнэ мэдэгдэж буй материал 71145000-тай нийлээд мэдэгдэж буй subtotal
+336945000 MNT болно. Дөрвөн материалын үнэ дутуу тул энэ нь бүрэн төсөв биш,
+`INCOMPLETE` хэвээр. Operator/fuel/delivery тарифт багтсан snapshot нөхцөлийг
+дараа давхар нэмж болохгүй; багтсан хүргэлт нэг талдаа 25 км.
+
+Equipment link байхгүй ажлыг equipment шаардлагатай гэж таахгүй, энэ шалтгаанаар
+дангаар нь incomplete болгохгүй. `REJECTED`/`SUPERSEDED` link subtotal-д орохгүй,
+excluded warning-д орно. Production summary-г ашиглахаас өмнө explicit 0003 migration
+шаардлагатай. Write API authentication нэмэгдэх хүртэл local-development-only хэвээр.

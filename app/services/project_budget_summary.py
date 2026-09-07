@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
 
-from app.services.work_budget_summary import MaterialBudgetInput, summarize_work_budget
+from app.services.work_budget_summary import EquipmentBudgetInput, MaterialBudgetInput, summarize_work_budget
 
 
 @dataclass(frozen=True)
@@ -15,6 +15,7 @@ class ProjectWorkBudgetInput:
     labor_total: float | None
     status: str
     materials: list[MaterialBudgetInput]
+    equipment: list[EquipmentBudgetInput]
 
 
 def summarize_project_budget(works: list[ProjectWorkBudgetInput]) -> dict:
@@ -29,8 +30,14 @@ def summarize_project_budget(works: list[ProjectWorkBudgetInput]) -> dict:
     review_links = []
     compact = []
     has_review = False
+    equipment_subtotal = Decimal("0.00")
+    equipment_link_count = equipment_priced = equipment_missing = equipment_review = equipment_excluded = 0
+    missing_equipment_pairs = []
+    review_equipment_pairs = []
+    excluded_equipment_pairs = []
+    equipment_warnings = []
     for work in works:
-        totals = summarize_work_budget(work.labor_total, work.materials)
+        totals = summarize_work_budget(work.labor_total, work.materials, work.equipment)
         work_review = totals.has_review_warnings or work.status == "NEEDS_REVIEW"
         has_review = has_review or work_review
         if totals.pricing_status == "NO_MATERIALS":
@@ -51,10 +58,27 @@ def summarize_project_budget(works: list[ProjectWorkBudgetInput]) -> dict:
                 Decimal("0.01"), rounding=ROUND_HALF_UP
             )
         material += totals.material_subtotal_known
+        equipment_subtotal += totals.equipment_subtotal_known
         link_count += totals.material_link_count
         priced_count += totals.priced_material_count
         missing_count += totals.missing_price_count
         review_count += totals.needs_review_count
+        equipment_link_count += totals.equipment_link_count
+        equipment_priced += totals.priced_equipment_link_count
+        equipment_missing += totals.missing_equipment_rate_link_count
+        equipment_review += totals.needs_review_equipment_link_count
+        equipment_excluded += totals.excluded_equipment_link_count
+        missing_equipment_pairs.extend({"work_id": work.work_id, "equipment_id": eid} for eid in totals.missing_equipment_rate_ids)
+        review_equipment_pairs.extend({"work_id": work.work_id, "equipment_id": eid} for eid in totals.needs_review_equipment_ids)
+        excluded_equipment_pairs.extend({"work_id": work.work_id, "equipment_id": eid} for eid in totals.excluded_equipment_ids)
+        for item in work.equipment:
+            if item.link_status in ("REJECTED", "SUPERSEDED"):
+                equipment_warnings.append(f"Equipment excluded from budget: {work.work_id} / {item.equipment_id}")
+                continue
+            if item.agreed_unit_rate is None:
+                equipment_warnings.append(f"Missing equipment rate: {work.work_id} / {item.equipment_id}")
+            if item.link_status in ("NEEDS_REVIEW", "ACTIVE_WITH_WARNINGS"):
+                equipment_warnings.append(f"Equipment needs review: {work.work_id} / {item.equipment_id}")
         missing_links.extend(
             {"work_id": work.work_id, "material_id": mid}
             for mid in totals.missing_price_material_ids
@@ -72,6 +96,12 @@ def summarize_project_budget(works: list[ProjectWorkBudgetInput]) -> dict:
             "missing_price_count": totals.missing_price_count,
             "needs_review_count": totals.needs_review_count,
             "pricing_status": work_status,
+            "equipment_subtotal_known": totals.equipment_subtotal_known,
+            "equipment_link_count": totals.equipment_link_count,
+            "priced_equipment_link_count": totals.priced_equipment_link_count,
+            "missing_equipment_rate_link_count": totals.missing_equipment_rate_link_count,
+            "needs_review_equipment_link_count": totals.needs_review_equipment_link_count,
+            "excluded_equipment_link_count": totals.excluded_equipment_link_count,
         })
     status = (
         "NO_WORK_ITEMS" if not works else
@@ -92,7 +122,17 @@ def summarize_project_budget(works: list[ProjectWorkBudgetInput]) -> dict:
         "needs_review_link_count": review_count,
         "labor_subtotal_known": labor,
         "material_subtotal_known": material,
-        "subtotal_known_before_vat": (labor + material).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+        "equipment_link_count": equipment_link_count,
+        "priced_equipment_link_count": equipment_priced,
+        "missing_equipment_rate_link_count": equipment_missing,
+        "needs_review_equipment_link_count": equipment_review,
+        "excluded_equipment_link_count": equipment_excluded,
+        "equipment_subtotal_known": equipment_subtotal,
+        "missing_equipment_rate_pairs": missing_equipment_pairs,
+        "needs_review_equipment_pairs": review_equipment_pairs,
+        "excluded_equipment_pairs": excluded_equipment_pairs,
+        "warnings": equipment_warnings,
+        "subtotal_known_before_vat": (labor + material + equipment_subtotal).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
         "is_pricing_complete": bool(works) and incomplete == 0,
         "has_review_warnings": has_review,
         "pricing_status": status,
