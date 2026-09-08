@@ -455,3 +455,48 @@ Equipment link байхгүй ажлыг equipment шаардлагатай гэ
 дангаар нь incomplete болгохгүй. `REJECTED`/`SUPERSEDED` link subtotal-д орохгүй,
 excluded warning-д орно. Production summary-г ашиглахаас өмнө explicit 0003 migration
 шаардлагатай. Write API authentication нэмэгдэх хүртэл local-development-only хэвээр.
+
+## Hubstar AI Web Dashboard
+
+Web dashboard нь [backend API](http://127.0.0.1:8000)-аас төслийн төсөв болон
+сонгосон ажлын материал, машин механизмын мэдээллийг зөвхөн уншиж харуулна.
+Frontend-ийн local development URL нь [http://127.0.0.1:3000](http://127.0.0.1:3000).
+Ажиллуулахын өмнө Node.js болон npm суусан байна.
+
+Frontend dependency-г суулгах:
+
+```powershell
+cd frontend
+npm install
+```
+
+Environment тохиргоонд `.env.example`-ийг `.env.local` болгон хуулж болно:
+
+```dotenv
+VITE_API_BASE_URL=http://127.0.0.1:8000
+VITE_PROJECT_ID=PRJ-ALTAI-R7-B
+```
+
+Development server, production build болон lint шалгалт:
+
+```powershell
+npm run dev -- --host 127.0.0.1 --port 3000
+npm run build
+npm run lint
+```
+
+Windows дээр npm `PATH`-аас олдохгүй бол бүтэн замаар ажиллуулна:
+
+```powershell
+& "C:\Program Files\nodejs\npm.cmd" install
+& "C:\Program Files\nodejs\npm.cmd" run dev -- --host 127.0.0.1 --port 3000
+```
+
+Dashboard одоогоор read-only бөгөөд authentication/authorization болон write UI
+хараахан байхгүй. Local CORS нь зөвхөн `http://127.0.0.1:3000` болон
+`http://localhost:3000` origin-оос GET хүсэлт зөвшөөрнө. Production deployment-д
+Vite dev server болон энэ local CORS тохиргоог шууд ашиглахгүй.
+
+API-ийн `subtotal_known_before_vat` талбарыг UI дээр **“Баталгаажсан нийт”** гэж
+харуулдаг. Одоогийн материалын үнэд НӨАТ-тай үнэ байгаа тул уг дүнг санхүүгийн
+тайлангийн “НӨАТ-ын өмнөх нийт” гэж шууд ойлгож болохгүй.
