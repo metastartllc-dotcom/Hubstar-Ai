@@ -1,6 +1,7 @@
 """HTTP API entry point for Hubstar AI."""
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes.equipment import router as equipment_router
 
 from app.api.routes.projects import router as projects_router
@@ -13,6 +14,16 @@ from app.api.routes.work_equipment_links import router as work_equipment_links_r
 
 
 app = FastAPI(title="Hubstar AI", docs_url="/docs")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://127.0.0.1:3000",
+        "http://localhost:3000",
+    ],
+    allow_credentials=False,
+    allow_methods=["GET"],
+    allow_headers=["*"],
+)
 app.include_router(equipment_router)
 app.include_router(projects_router)
 app.include_router(work_items_router)
