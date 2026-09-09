@@ -500,3 +500,28 @@ Vite dev server болон энэ local CORS тохиргоог шууд аши�
 API-ийн `subtotal_known_before_vat` талбарыг UI дээр **“Баталгаажсан нийт”** гэж
 харуулдаг. Одоогийн материалын үнэд НӨАТ-тай үнэ байгаа тул уг дүнг санхүүгийн
 тайлангийн “НӨАТ-ын өмнөх нийт” гэж шууд ойлгож болохгүй.
+
+## Unified Excel import preview
+
+Нэгдсэн 6R/7R Excel workbook-ийн ажил болон Material Master өгөгдлийг нэг
+database-д оруулахын өмнө зөвхөн preview report үүсгэж болно. Энэ команд database-д
+мөр нэмэх, шинэчлэх, устгахгүй бөгөөд `--dry-run` заавал өгөгдөнө:
+
+```powershell
+.\.venv\Scripts\python.exe -m app.cli.import_excel `
+  --file "C:\absolute\path\Hubstar_6R_7R_Material_Unified_Import.xlsx" `
+  --project-id "PRJ-ALTAI-R7-B" `
+  --database-path "C:\absolute\path\hubstar.db" `
+  --dry-run `
+  --report-dir "C:\absolute\empty\temporary-report-directory"
+```
+
+Report directory нь repository, workbook болон database байрлах хавтаснаас гадна,
+шинэ эсвэл хоосон байх ёстой. Команд summary JSON, ажил/материалын preview CSV,
+үнэ нягтлах CSV, conflict CSV гэсэн таван файл үүсгэнэ. Preview report өөрөө
+production import биш.
+
+Үнэ баталгаатай proposal `ACTIVE`; тодорхойгүй эсвэл олон exact reference үнэтэй
+proposal `NEEDS_REVIEW` байна. Эдгээр үнийг дараагийн шатанд судалж баталгаажуулна.
+Fuzzy match болон category median-ийг автоматаар үнэ болгохгүй. Одоогийн preview-д
+Equipment, transport болон WorkMaterialLink импорт орохгүй.
