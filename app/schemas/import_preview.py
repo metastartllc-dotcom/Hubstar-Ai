@@ -10,6 +10,8 @@ PreviewAction = Literal["CREATE", "SKIP", "CONFLICT", "REVIEW", "INVALID"]
 @dataclass(frozen=True)
 class WorkPreviewRow:
     source_work_id: str
+    work_master_id: str
+    source_dataset: str
     canonical_work_id: str
     name: str
     unit: str | None
@@ -20,6 +22,10 @@ class WorkPreviewRow:
     conflict_reason: str = ""
     source_row: int = 0
     category: str | None = None
+    master_action: PreviewAction = "CREATE"
+    master_conflict_reason: str = ""
+    master_link_action: str = "CREATE_WITH_MASTER"
+    master_link_conflict_reason: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -54,6 +60,7 @@ class DatabaseSnapshot:
     work_items: dict[str, dict[str, Any]]
     materials: dict[str, dict[str, Any]]
     total_changes: int = 0
+    work_masters: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

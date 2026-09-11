@@ -148,6 +148,97 @@ class ProjectWorkItemCreate(BaseModel):
             return UnitNormalizer.normalize(value)
         return value
 
+class WorkMasterCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    work_master_id: str = Field(pattern=r"^WKM-\d{6}$")
+    name: str
+    category: Optional[str] = None
+    default_unit: Optional[str] = None
+    default_labor_unit_rate: Optional[float] = Field(default=None, ge=0)
+    status: StatusEnum = StatusEnum.ACTIVE
+    source_dataset: Optional[str] = None
+    source_work_id: Optional[str] = None
+
+    @field_validator("work_master_id", "name", "category", "source_dataset", "source_work_id", mode="before")
+    @classmethod
+    def trim_strings(cls, value):
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                raise ValueError("must not be empty")
+        return value
+
+    @field_validator("default_unit", mode="before")
+    @classmethod
+    def normalize_unit(cls, value):
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                raise ValueError("must not be empty")
+            return UnitNormalizer.normalize(value)
+        return value
+
+    @model_validator(mode="after")
+    def validate_source_pair(self):
+        if (self.source_dataset is None) != (self.source_work_id is None):
+            raise ValueError("source_dataset and source_work_id must be supplied together")
+        return self
+
+
+class WorkMasterPublicResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    work_master_id: str = Field(pattern=r"^WKM-\d{6}$")
+    name: str
+    category: Optional[str] = None
+    default_unit: Optional[str] = None
+    default_labor_unit_rate: Optional[float] = None
+    status: StatusEnum
+    source_dataset: Optional[str] = None
+    source_work_id: Optional[str] = None
+
+
+class ProjectWorkItemFromMasterCreate(BaseModel):
+    """Create a project snapshot from a reusable work master."""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    work_master_id: str
+    work_id: str
+    name: Optional[str] = None
+    wbs_code: Optional[str] = None
+    unit: Optional[str] = None
+    quantity: Optional[float] = Field(default=None, ge=0)
+    labor_unit_rate: Optional[float] = Field(default=None, ge=0)
+    status: StatusEnum = StatusEnum.ACTIVE
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_null_name_override(cls, data):
+        if isinstance(data, dict) and "name" in data and data["name"] is None:
+            raise ValueError("name must not be null when supplied")
+        return data
+
+    @field_validator("work_master_id", "work_id", "name", "wbs_code", mode="before")
+    @classmethod
+    def trim_non_empty_strings(cls, value):
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                raise ValueError("must not be empty")
+        return value
+
+    @field_validator("unit", mode="before")
+    @classmethod
+    def normalize_override_unit(cls, value):
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                raise ValueError("must not be empty")
+            return UnitNormalizer.normalize(value)
+        return value
+
 class WorkItemUpdateRequest(BaseModel):
     """Only mutable work attributes; omitted values remain unchanged."""
 
@@ -194,6 +285,7 @@ class WorkItemPatchResponse(BaseModel):
     labor_unit_rate: Optional[float] = None
     labor_total: Optional[float] = None
     status: StatusEnum
+    work_master_id: Optional[str] = None
 
 
 class ProjectWorkItemResponse(BaseModel):
@@ -208,6 +300,7 @@ class ProjectWorkItemResponse(BaseModel):
     labor_unit_rate: Optional[float] = None
     labor_total: Optional[float] = None
     status: StatusEnum
+    work_master_id: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
 
 class MaterialBase(BaseModel):

@@ -46,9 +46,10 @@ def write_preview_reports(
         output.write("\n")
 
     work_fields = [
-        "source_work_id", "canonical_work_id", "name", "unit", "quantity",
+        "source_work_id", "work_master_id", "source_dataset", "canonical_work_id", "name", "unit", "quantity",
         "labor_unit_rate", "proposed_status", "action", "conflict_reason",
-        "source_row", "category",
+        "source_row", "category", "master_action", "master_conflict_reason",
+        "master_link_action", "master_link_conflict_reason",
     ]
     material_fields = [
         "material_id", "name", "normalized_unit", "specification", "category",
@@ -76,6 +77,17 @@ def write_preview_reports(
         for row in work_rows
         if row.action in {"CONFLICT", "INVALID"}
     ]
+    conflicts.extend(
+        {
+            "entity_type": "work_master",
+            "external_id": row.work_master_id,
+            "action": row.master_action,
+            "conflict_reason": row.master_conflict_reason,
+            "source_row": row.source_row,
+        }
+        for row in work_rows
+        if row.master_action in {"CONFLICT", "INVALID"}
+    )
     conflicts.extend(
         {
             "entity_type": "material",

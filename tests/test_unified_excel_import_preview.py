@@ -127,6 +127,17 @@ def test_complete_preview_is_read_only_deterministic_and_utf8(preview_inputs, tm
         "source": 65, "valid": 65, "create": 64,
         "existing_identical": 1, "existing_conflict": 0,
     }
+    assert result.summary["work_master_summary"] == {
+        "source": 65, "valid": 65, "create": 65,
+        "existing_identical": 0, "existing_conflict": 0,
+        "source_dataset": "HUBSTAR_6R_7R_UNIFIED_2026",
+        "project_work_link_create": 64, "existing_work_link": 1,
+        "already_linked": 0, "link_conflict": 0,
+    }
+    assert result.work_rows[0].source_work_id == "WRK-ALTAI-B-001"
+    assert result.work_rows[0].work_master_id == "WKM-000001"
+    assert result.work_rows[-1].work_master_id == "WKM-000065"
+    assert result.work_rows[0].master_link_action == "LINK_EXISTING"
     materials = result.summary["material_summary"]
     assert materials["source"] == materials["valid"] == 986
     assert materials["create"] == 980
@@ -245,6 +256,53 @@ def test_existing_conflicts_are_reported(preview_inputs, tmp_path):
     assert [(row["entity_type"], row["external_id"]) for row in conflicts] == sorted(
         (row["entity_type"], row["external_id"]) for row in conflicts
     )
+
+
+def test_existing_work_master_is_compared_and_source_collision_fails_closed(preview_inputs, tmp_path):
+    workbook, database, reports = preview_inputs
+    with sqlite3.connect(database) as db:
+        db.execute("""
+            CREATE TABLE work_masters (
+              id INTEGER PRIMARY KEY, work_master_id TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
+              category TEXT, default_unit TEXT, default_labor_unit_rate REAL, status TEXT NOT NULL,
+              source_dataset TEXT, source_work_id TEXT,
+              UNIQUE(source_dataset, source_work_id)
+            )
+        """)
+        db.execute("""
+            INSERT INTO work_masters(work_master_id,name,category,default_unit,default_labor_unit_rate,status,source_dataset,source_work_id)
+            VALUES('WKM-000001','Ажил 1','Ангилал','м²',1000,'ACTIVE','HUBSTAR_6R_7R_UNIFIED_2026','WRK-ALTAI-B-001')
+        """)
+    result = run_preview(
+        file_path=workbook, project_id=PROJECT_ID, database_path=database,
+        report_dir=reports, repository_root=tmp_path / "repository",
+    )
+    assert result.summary["work_master_summary"]["existing_identical"] == 1
+    assert result.summary["work_master_summary"]["create"] == 64
+
+    database2 = tmp_path / "collision.db"
+    make_database(database2)
+    with sqlite3.connect(database2) as db:
+        db.execute("""
+            CREATE TABLE work_masters (
+              id INTEGER PRIMARY KEY, work_master_id TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
+              category TEXT, default_unit TEXT, default_labor_unit_rate REAL, status TEXT NOT NULL,
+              source_dataset TEXT, source_work_id TEXT,
+              UNIQUE(source_dataset, source_work_id)
+            )
+        """)
+        db.execute("""
+            INSERT INTO work_masters(work_master_id,name,status,source_dataset,source_work_id)
+            VALUES('WKM-999999','Other','ACTIVE','HUBSTAR_6R_7R_UNIFIED_2026','WRK-ALTAI-B-001')
+        """)
+    collision_reports = tmp_path.parent / f"collision-reports-{tmp_path.name}"
+    collision = run_preview(
+        file_path=workbook, project_id=PROJECT_ID, database_path=database2,
+        report_dir=collision_reports, repository_root=tmp_path / "repository",
+    )
+    first = next(row for row in collision.work_rows if row.source_work_id == "WRK-ALTAI-B-001")
+    assert first.master_action == "CONFLICT"
+    assert "different work master ID" in first.master_conflict_reason
 
 
 @pytest.mark.parametrize("value", [True, -1, float("nan"), float("inf"), float("-inf")])

@@ -501,6 +501,52 @@ API-ийн `subtotal_known_before_vat` талбарыг UI дээр **“Бат�
 харуулдаг. Одоогийн материалын үнэд НӨАТ-тай үнэ байгаа тул уг дүнг санхүүгийн
 тайлангийн “НӨАТ-ын өмнөх нийт” гэж шууд ойлгож болохгүй.
 
+## Work Master / Work Catalog
+
+Work Master нь төслөөс үл хамаарах, дахин ашиглах ажлын template өгөгдөл юм.
+Project WorkItem үүсэх үед master-ийн нэр, нэгж, хөдөлмөрийн нэгж тарифыг тухайн
+төслийн snapshot болгон хуулна. Master дараа өөрчлөгдсөн ч өмнө үүссэн төслийн
+ажил болон батлагдсан төсөв автоматаар өөрчлөгдөхгүй.
+
+Catalog API:
+
+- `GET /api/v1/work-masters`
+- `GET /api/v1/work-masters/{work_master_id}`
+- `POST /api/v1/work-masters`
+- `POST /api/v1/projects/{project_id}/work-items/from-master`
+
+Жишээ master:
+
+```json
+{
+  "work_master_id": "WKM-000001",
+  "name": "Гадна фасадны нийт ажил",
+  "category": "Фасад",
+  "default_unit": "м²",
+  "default_labor_unit_rate": 50000,
+  "source_dataset": "HUBSTAR_6R_7R_UNIFIED_2026",
+  "source_work_id": "WRK-ALTAI-B-001"
+}
+```
+
+Excel-ийн `WRK-ALTAI-B-NNN` source ID нь deterministic байдлаар зургаан оронтой
+`WKM-NNNNNN` ID болно; source ID-г тусад нь хадгална. Project ажил үүсгэхдээ
+external master ID болон project-specific external work ID хэрэглэнэ:
+
+```json
+{
+  "work_master_id": "WKM-000001",
+  "work_id": "PRJ-ALTAI-R7-B-WRK-001",
+  "quantity": 5100
+}
+```
+
+`work_master_ref_id` нь дотоод FK тул API response-д гарахгүй. Existing manual
+WorkItem мөрүүд master reference-гүй хэвээр ажиллана. Schema-г production database-д
+хэрэглэхийн өмнө backup авч, explicit `python -m alembic upgrade head` командаар
+0004 migration ажиллуулна. Write endpoint authentication нэмэгдэх хүртэл зөвхөн
+local development зориулалттай.
+
 ## Unified Excel import preview
 
 Нэгдсэн 6R/7R Excel workbook-ийн ажил болон Material Master өгөгдлийг нэг

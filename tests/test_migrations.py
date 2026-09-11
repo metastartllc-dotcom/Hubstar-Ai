@@ -40,22 +40,28 @@ def test_upgrade_existing_data_repeat_and_round_trip(tmp_path):
                           for t in before_data}
     command.upgrade(cfg, "head"); command.upgrade(cfg, "head")
     with sqlite3.connect(path) as db:
-        assert db.execute("select version_num from alembic_version").fetchone()[0] == "0003_work_equipment_links"
+        assert db.execute("select version_num from alembic_version").fetchone()[0] == "0004_work_masters"
         assert db.execute("select equipment_id,type," + COLUMN + " from equipments").fetchone() == ("E", "Crane", None)
         assert db.execute("select count(*) from work_material_links").fetchone()[0] == 1
         assert COLUMN in {r[1] for r in db.execute("pragma table_info(equipments)")}
-        assert {t: db.execute(f'SELECT * FROM "{t}"').fetchall() for t in before_data} == {
-            **before_data, "equipments": [(1, "E", "Crane", None)]}
-        assert {t: db.execute(f'PRAGMA foreign_key_list("{t}")').fetchall() for t in before_data} == before_fks
-        assert {t: db.execute(f'PRAGMA index_list("{t}")').fetchall() for t in before_data} == before_indexes
+        current = {t: db.execute(f'SELECT * FROM "{t}"').fetchall() for t in before_data}
+        assert current == {**before_data, "equipments": [(1, "E", "Crane", None)],
+                           "work_items": [(1, "W", 1, "Work", None)]}
+        for table in before_data.keys() - {"work_items"}:
+            assert db.execute(f'PRAGMA foreign_key_list("{table}")').fetchall() == before_fks[table]
+            assert db.execute(f'PRAGMA index_list("{table}")').fetchall() == before_indexes[table]
+        assert any(row[2] == "work_masters" for row in db.execute('PRAGMA foreign_key_list("work_items")'))
+        assert "ix_work_items_work_master_ref_id" in {row[1] for row in db.execute('PRAGMA index_list("work_items")')}
     command.downgrade(cfg, "0001_existing_schema")
     with sqlite3.connect(path) as db:
         assert COLUMN not in {r[1] for r in db.execute("pragma table_info(equipments)")}
     command.upgrade(cfg, "head")
     with sqlite3.connect(path) as db:
         assert db.execute("select equipment_id,type from equipments").fetchall() == [("E", "Crane")]
-        assert {t: db.execute(f'PRAGMA foreign_key_list("{t}")').fetchall() for t in before_data} == before_fks
-        assert {t: db.execute(f'PRAGMA index_list("{t}")').fetchall() for t in before_data} == before_indexes
+        for table in before_data.keys() - {"work_items"}:
+            assert db.execute(f'PRAGMA foreign_key_list("{table}")').fetchall() == before_fks[table]
+            assert db.execute(f'PRAGMA index_list("{table}")').fetchall() == before_indexes[table]
+        assert any(row[2] == "work_masters" for row in db.execute('PRAGMA foreign_key_list("work_items")'))
 
 def test_fresh_create_all_upgrade_is_compatible_and_import_is_passive(tmp_path):
     path = tmp_path / "fresh.db"; engine = create_engine("sqlite:///" + path.as_posix())
@@ -66,7 +72,7 @@ def test_fresh_create_all_upgrade_is_compatible_and_import_is_passive(tmp_path):
     command.upgrade(config(path), "head"); command.upgrade(config(path), "head")
     engine = create_engine("sqlite:///" + path.as_posix())
     assert COLUMN in {c["name"] for c in inspect(engine).get_columns("equipments")}
-    assert engine.connect().execute(text("select version_num from alembic_version")).scalar() == "0003_work_equipment_links"
+    assert engine.connect().execute(text("select version_num from alembic_version")).scalar() == "0004_work_masters"
     engine.dispose(); assert path.stat().st_size >= before
 
 
@@ -109,3 +115,47 @@ def test_malformed_existing_work_equipment_table_fails(tmp_path):
         db.execute("create table work_equipment_links(id integer primary key)")
     with pytest.raises(RuntimeError, match="incompatible column contract"):
         command.upgrade(cfg, "head")
+
+
+def test_work_master_migration_adds_nullable_reference_without_backfill_and_round_trips(tmp_path):
+    path = tmp_path / "work-masters.db"; old_schema(path); cfg = config(path)
+    command.upgrade(cfg, "0003_work_equipment_links")
+    with sqlite3.connect(path) as db:
+        before_work = db.execute("select id, work_id, project_id, name from work_items").fetchall()
+    command.upgrade(cfg, "head")
+    with sqlite3.connect(path) as db:
+        assert db.execute("select version_num from alembic_version").fetchone()[0] == "0004_work_masters"
+        columns = {row[1]: row for row in db.execute("pragma table_info(work_masters)")}
+        assert {"work_master_id", "name", "category", "default_unit", "default_labor_unit_rate", "status", "source_dataset", "source_work_id"}.issubset(columns)
+        assert columns["work_master_id"][3] == columns["name"][3] == columns["status"][3] == 1
+        table_sql = db.execute(
+            "select sql from sqlite_master where type='table' and name='work_masters'"
+        ).fetchone()[0]
+        assert "ck_work_master_source_pair" in table_sql
+        work_columns = {row[1]: row for row in db.execute("pragma table_info(work_items)")}
+        assert work_columns["work_master_ref_id"][3] == 0
+        assert db.execute("select work_master_ref_id from work_items").fetchone()[0] is None
+        assert db.execute("select id, work_id, project_id, name from work_items").fetchall() == before_work
+        indexes = {row[1] for row in db.execute("pragma index_list(work_items)")}
+        assert "ix_work_items_work_master_ref_id" in indexes
+        unique_work_indexes = [row[1] for row in db.execute("pragma index_list(work_items)") if row[2] == 1]
+        assert any(
+            [column[2] for column in db.execute(f'pragma index_info("{index}")')] == ["work_id"]
+            for index in unique_work_indexes
+        )
+        fks = db.execute("pragma foreign_key_list(work_items)").fetchall()
+        assert any(row[2] == "work_masters" and row[3] == "work_master_ref_id" and row[4] == "id" for row in fks)
+        db.execute("insert into work_masters(work_master_id,name,status,source_dataset,source_work_id) values('WKM-000001','Work','ACTIVE','D','W')")
+        with pytest.raises(sqlite3.IntegrityError):
+            db.execute("insert into work_masters(work_master_id,name,status,source_dataset,source_work_id) values('WKM-000002','Work 2','ACTIVE','D','W')")
+        for dataset, source_id in (("D", None), (None, "W")):
+            with pytest.raises(sqlite3.IntegrityError):
+                db.execute(
+                    "insert into work_masters(work_master_id,name,status,source_dataset,source_work_id) values(?,?,?,?,?)",
+                    (f"WKM-PARTIAL-{dataset or source_id}", "Bad", "ACTIVE", dataset, source_id),
+                )
+    command.downgrade(cfg, "0003_work_equipment_links")
+    with sqlite3.connect(path) as db:
+        assert "work_masters" not in {row[0] for row in db.execute("select name from sqlite_master where type='table'")}
+        assert "work_master_ref_id" not in {row[1] for row in db.execute("pragma table_info(work_items)")}
+        assert db.execute("select id, work_id, project_id, name from work_items").fetchall() == before_work

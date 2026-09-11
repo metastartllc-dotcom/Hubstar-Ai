@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Date, Boolean, Enum, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Date, Boolean, CheckConstraint, Enum, UniqueConstraint
 from sqlalchemy.orm import relationship
 import enum
 from decimal import Decimal
@@ -38,11 +38,33 @@ class Project(Base):
     owner_organization_id = Column(Integer, ForeignKey("organizations.id"))
     contractor_organization_id = Column(Integer, ForeignKey("organizations.id"))
 
+class WorkMaster(Base):
+    __tablename__ = "work_masters"
+    __table_args__ = (
+        UniqueConstraint("source_dataset", "source_work_id", name="uq_work_master_source"),
+        CheckConstraint(
+            "(source_dataset IS NULL AND source_work_id IS NULL) OR "
+            "(source_dataset IS NOT NULL AND source_work_id IS NOT NULL)",
+            name="ck_work_master_source_pair",
+        ),
+    )
+    id = Column(Integer, primary_key=True, index=True)
+    work_master_id = Column(String, nullable=False, unique=True, index=True)
+    name = Column(String, nullable=False)
+    category = Column(String)
+    default_unit = Column(String)
+    default_labor_unit_rate = Column(Float)
+    status = Column(Enum(StatusEnum), nullable=False, default=StatusEnum.ACTIVE)
+    source_dataset = Column(String)
+    source_work_id = Column(String)
+    work_items = relationship("WorkItem", back_populates="work_master")
+
 class WorkItem(Base):
     __tablename__ = "work_items"
     id = Column(Integer, primary_key=True, index=True)
     work_id = Column(String, unique=True, index=True)
     project_id = Column(Integer, ForeignKey("projects.id"))
+    work_master_ref_id = Column(Integer, ForeignKey("work_masters.id"), nullable=True, index=True)
     wbs_code = Column(String)
     name = Column(String, nullable=False)
     unit = Column(String)
@@ -50,6 +72,11 @@ class WorkItem(Base):
     labor_unit_rate = Column(Float)
     labor_total = Column(Float)
     status = Column(Enum(StatusEnum), default=StatusEnum.ACTIVE)
+    work_master = relationship("WorkMaster", back_populates="work_items")
+
+    @property
+    def work_master_id(self):
+        return self.work_master.work_master_id if self.work_master is not None else None
 
 class Material(Base):
     __tablename__ = "materials"

@@ -40,6 +40,7 @@ WORK_HEADERS = (
     "НӨАТ-ын өмнөх дүн", "НӨАТ", "Нийт",
 )
 WORK_ID_PATTERN = re.compile(r"^WRK-ALTAI-B-(\d{3})$")
+WORK_MASTER_SOURCE_DATASET = "HUBSTAR_6R_7R_UNIFIED_2026"
 EXPECTED_MATERIAL_ROWS = 986
 EXPECTED_WORK_ROWS = 65
 
@@ -176,6 +177,7 @@ def _parse_work_rows(raw_rows: list[tuple[int, tuple[Any, ...]]], project_id: st
     parsed: list[dict[str, Any]] = []
     source_ids: list[str] = []
     canonical_ids: list[str] = []
+    master_ids: list[str] = []
     for row_number, row in raw_rows:
         source_id = _text(row[0], required=True)
         assert source_id is not None
@@ -183,6 +185,7 @@ def _parse_work_rows(raw_rows: list[tuple[int, tuple[Any, ...]]], project_id: st
         if match is None:
             raise PreviewValidationError(f"Invalid Work ID at row {row_number}: {source_id}")
         canonical_id = f"{project_id}-WRK-{match.group(1)}"
+        work_master_id = f"WKM-{int(match.group(1)):06d}"
         payload = {
             "work_id": canonical_id,
             "name": _text(row[2], required=True),
@@ -197,14 +200,19 @@ def _parse_work_rows(raw_rows: list[tuple[int, tuple[Any, ...]]], project_id: st
             raise PreviewValidationError(f"Invalid work row {row_number}") from exc
         source_ids.append(source_id)
         canonical_ids.append(canonical_id)
+        master_ids.append(work_master_id)
         parsed.append({
             **validated.model_dump(mode="json"), "source_work_id": source_id,
+            "work_master_id": work_master_id,
+            "source_dataset": WORK_MASTER_SOURCE_DATASET,
             "source_row": row_number, "category": _text(row[1]),
         })
     if len(set(source_ids)) != EXPECTED_WORK_ROWS:
         raise PreviewValidationError("Duplicate Work ID detected")
     if len(set(canonical_ids)) != EXPECTED_WORK_ROWS:
         raise PreviewValidationError("Work ID mapping collision detected")
+    if len(set(master_ids)) != EXPECTED_WORK_ROWS:
+        raise PreviewValidationError("Work master ID mapping collision detected")
     return parsed
 
 
@@ -261,20 +269,57 @@ def _parse_material_rows(raw_rows: list[tuple[int, tuple[Any, ...]]]) -> list[di
 def _work_preview(parsed: Iterable[dict[str, Any]], snapshot: Any) -> list[WorkPreviewRow]:
     output: list[WorkPreviewRow] = []
     for row in parsed:
+        master = snapshot.work_masters.get(row["work_master_id"])
+        master_action = "CREATE"
+        master_reason = ""
+        source_owner = next((item for item in snapshot.work_masters.values()
+                             if item["source_dataset"] == row["source_dataset"]
+                             and item["source_work_id"] == row["source_work_id"]), None)
+        if source_owner is not None and source_owner["work_master_id"] != row["work_master_id"]:
+            master_action = "CONFLICT"
+            master_reason = "Source pair belongs to a different work master ID"
+        elif master is not None:
+            expected_master = {
+                "name": row["name"], "category": row["category"],
+                "default_unit": row["unit"],
+                "default_labor_unit_rate": row["labor_unit_rate"], "status": "ACTIVE",
+                "source_dataset": row["source_dataset"], "source_work_id": row["source_work_id"],
+            }
+            differences = [field for field, value in expected_master.items() if not _same(master[field], value)]
+            master_action = "SKIP" if not differences else "CONFLICT"
+            master_reason = "" if not differences else f"Existing master fields differ: {', '.join(differences)}"
         existing = snapshot.work_items.get(row["work_id"])
         action = "CREATE"
         reason = ""
+        link_action = "CREATE_WITH_MASTER"
+        link_reason = ""
         if existing is not None:
             fields = ("name", "unit", "quantity", "labor_unit_rate", "status")
             differences = [field for field in fields if not _same(existing[field], row[field])]
             action = "SKIP" if not differences else "CONFLICT"
             reason = "" if not differences else f"Existing fields differ: {', '.join(differences)}"
+            if differences:
+                link_action = "CONFLICT"
+                link_reason = "Existing project work differs; master reference must not be attached"
+            elif existing.get("work_master_id") is None:
+                link_action = "LINK_EXISTING"
+            elif existing["work_master_id"] == row["work_master_id"]:
+                link_action = "SKIP"
+            else:
+                link_action = "CONFLICT"
+                link_reason = "Existing project work references a different work master"
+        if master_action == "CONFLICT":
+            link_action = "CONFLICT"
+            link_reason = "Work master conflict must be resolved before project linking"
         output.append(WorkPreviewRow(
-            source_work_id=row["source_work_id"], canonical_work_id=row["work_id"],
+            source_work_id=row["source_work_id"], work_master_id=row["work_master_id"],
+            source_dataset=row["source_dataset"], canonical_work_id=row["work_id"],
             name=row["name"], unit=row["unit"], quantity=row["quantity"],
             labor_unit_rate=row["labor_unit_rate"], proposed_status="ACTIVE",
             action=action, conflict_reason=reason, source_row=row["source_row"],
-            category=row["category"],
+            category=row["category"], master_action=master_action,
+            master_conflict_reason=master_reason,
+            master_link_action=link_action, master_link_conflict_reason=link_reason,
         ))
     return sorted(output, key=lambda item: item.canonical_work_id)
 
@@ -365,6 +410,8 @@ def _summary(
 ) -> dict[str, Any]:
     resolutions = Counter(row.price_resolution for row in material_rows)
     work_actions = Counter(row.action for row in work_rows)
+    master_actions = Counter(row.master_action for row in work_rows)
+    master_link_actions = Counter(row.master_link_action for row in work_rows)
     material_actions = Counter(row.action for row in material_rows)
     return {
         "schema_version": "1.0",
@@ -384,6 +431,16 @@ def _summary(
             "source": len(work_rows), "valid": len(work_rows),
             "create": work_actions["CREATE"], "existing_identical": work_actions["SKIP"],
             "existing_conflict": work_actions["CONFLICT"],
+        },
+        "work_master_summary": {
+            "source": len(work_rows), "valid": len(work_rows),
+            "create": master_actions["CREATE"], "existing_identical": master_actions["SKIP"],
+            "existing_conflict": master_actions["CONFLICT"],
+            "source_dataset": WORK_MASTER_SOURCE_DATASET,
+            "project_work_link_create": master_link_actions["CREATE_WITH_MASTER"],
+            "existing_work_link": master_link_actions["LINK_EXISTING"],
+            "already_linked": master_link_actions["SKIP"],
+            "link_conflict": master_link_actions["CONFLICT"],
         },
         "material_summary": {
             "source": len(material_rows), "valid": len(material_rows),
