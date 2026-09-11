@@ -5,9 +5,10 @@ from decimal import Decimal, ROUND_HALF_UP
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.models.models import WorkItem
+from app.models.models import StatusEnum, WorkItem
+from app.repositories.work_masters import get_work_master_by_work_master_id
 from app.repositories.projects import get_project_by_project_id
-from app.schemas.schemas import ProjectWorkItemCreate, WorkItemUpdateRequest
+from app.schemas.schemas import ProjectWorkItemCreate, ProjectWorkItemFromMasterCreate, WorkItemUpdateRequest
 
 
 class DuplicateWorkIdError(Exception):
@@ -16,6 +17,28 @@ class DuplicateWorkIdError(Exception):
 
 class WorkItemPersistenceError(Exception):
     """Raised when a work item database operation fails."""
+
+
+class WorkMasterNotFoundError(Exception):
+    """Raised when a requested external work master does not exist."""
+
+
+class InvalidWorkMasterStatusError(Exception):
+    """Raised when a work master cannot safely instantiate project work."""
+
+
+_STATUS_PRIORITY = {
+    StatusEnum.VALID: 0,
+    StatusEnum.ACTIVE: 1,
+    StatusEnum.ACTIVE_WITH_WARNINGS: 2,
+    StatusEnum.NEEDS_REVIEW: 3,
+    StatusEnum.REJECTED: 4,
+    StatusEnum.SUPERSEDED: 5,
+}
+
+
+def _effective_work_status(requested: StatusEnum, master: StatusEnum) -> StatusEnum:
+    return master if _STATUS_PRIORITY[master] > _STATUS_PRIORITY[requested] else requested
 
 
 def update_work_item(db: Session, project_id: str, work_id: str,
@@ -107,6 +130,63 @@ def create_work_item(
         db.refresh(work_item)
         return work_item
     except DuplicateWorkIdError:
+        db.rollback()
+        raise
+    except IntegrityError as exc:
+        db.rollback()
+        try:
+            duplicate = get_work_item_by_work_id(db, work_id)
+        except SQLAlchemyError as lookup_exc:
+            db.rollback()
+            raise WorkItemPersistenceError from lookup_exc
+        if duplicate is not None:
+            raise DuplicateWorkIdError from exc
+        raise WorkItemPersistenceError from exc
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise WorkItemPersistenceError from exc
+
+
+def create_work_item_from_master(
+    db: Session,
+    project_id: str,
+    request: ProjectWorkItemFromMasterCreate,
+) -> WorkItem | None:
+    """Snapshot master defaults into a project-owned work item."""
+    work_id = request.work_id
+    try:
+        project = get_project_by_project_id(db, project_id)
+        if project is None:
+            return None
+        master = get_work_master_by_work_master_id(db, request.work_master_id)
+        if master is None:
+            raise WorkMasterNotFoundError
+        if master.status in (StatusEnum.REJECTED, StatusEnum.SUPERSEDED):
+            raise InvalidWorkMasterStatusError
+        if get_work_item_by_work_id(db, work_id) is not None:
+            raise DuplicateWorkIdError
+
+        supplied = request.model_dump(exclude_unset=True)
+        name = supplied.get("name", master.name)
+        unit = supplied.get("unit", master.default_unit)
+        labor_rate = supplied.get("labor_unit_rate", master.default_labor_unit_rate)
+        work = WorkItem(
+            project_id=project.id,
+            work_master_ref_id=master.id,
+            work_id=work_id,
+            name=name,
+            wbs_code=request.wbs_code,
+            unit=unit,
+            quantity=request.quantity,
+            labor_unit_rate=labor_rate,
+            labor_total=_calculate_labor_total(request.quantity, labor_rate),
+            status=_effective_work_status(request.status, master.status),
+        )
+        db.add(work)
+        db.commit()
+        db.refresh(work)
+        return work
+    except (DuplicateWorkIdError, WorkMasterNotFoundError, InvalidWorkMasterStatusError):
         db.rollback()
         raise
     except IntegrityError as exc:

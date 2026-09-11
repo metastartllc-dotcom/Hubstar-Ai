@@ -7,7 +7,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.api.main import app
 from app.core.database import Base, get_db
-from app.models.models import Project, StatusEnum, WorkItem
+from app.models.models import Project, StatusEnum, WorkItem, WorkMaster
 from app.repositories import work_items as work_items_repository
 
 
@@ -103,6 +103,7 @@ def test_full_create_calculates_half_up_labor_total(client, db_session):
         "labor_unit_rate": 1.0,
         "labor_total": 10.01,
         "status": "VALID",
+        "work_master_id": None,
     }
 
 
@@ -413,7 +414,7 @@ def test_patch_openapi_public_response(client):
     operation = spec["paths"]["/api/v1/projects/{project_id}/work-items/{work_id}"]["patch"]
     ref = operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].split("/")[-1]
     fields = spec["components"]["schemas"][ref]["properties"]
-    assert set(fields) == {"work_id", "name", "wbs_code", "unit", "quantity", "labor_unit_rate", "labor_total", "status"}
+    assert set(fields) == {"work_id", "name", "wbs_code", "unit", "quantity", "labor_unit_rate", "labor_total", "status", "work_master_id"}
     assert "id" in spec["components"]["schemas"]["ProjectWorkItemResponse"]["properties"]
 
 
@@ -457,3 +458,132 @@ def test_null_quantity_link_and_summary_runtime(client, db_session):
     assert client.get(link_url).json()[0]["calculated_quantity"] == 0
     db_session.expire_all()
     assert persisted() == before
+
+
+def test_create_from_master_snapshots_defaults_and_exposes_only_external_master_id(client, db_session):
+    add_project(db_session)
+    master = WorkMaster(
+        work_master_id="WKM-000001", name="Master name", category="Category",
+        default_unit="м²", default_labor_unit_rate=12.345,
+        source_dataset="HUBSTAR_6R_7R_UNIFIED_2026", source_work_id="WRK-ALTAI-B-001",
+    )
+    db_session.add(master)
+    db_session.commit()
+    response = client.post("/api/v1/projects/PRJ-001/work-items/from-master", json={
+        "work_master_id": "WKM-000001", "work_id": "PRJ-001-WRK-001", "quantity": 2,
+    })
+    assert response.status_code == 201
+    body = response.json()
+    assert body["work_master_id"] == "WKM-000001"
+    assert body["name"] == "Master name"
+    assert body["unit"] == "м²"
+    assert body["labor_unit_rate"] == 12.345
+    assert body["labor_total"] == 24.69
+    assert "id" not in body and "work_master_ref_id" not in body and "project_id" not in body
+    stored = db_session.query(WorkItem).filter_by(work_id="PRJ-001-WRK-001").one()
+    assert stored.work_master_ref_id == master.id
+
+    master.name = "Changed master"
+    master.default_unit = "кг"
+    master.default_labor_unit_rate = 999
+    db_session.commit()
+    unchanged = client.get("/api/v1/projects/PRJ-001/work-items").json()[0]
+    assert (unchanged["name"], unchanged["unit"], unchanged["labor_unit_rate"], unchanged["labor_total"]) == (
+        "Master name", "м²", 12.345, 24.69,
+    )
+    latest = client.post("/api/v1/projects/PRJ-001/work-items/from-master", json={
+        "work_master_id": "WKM-000001", "work_id": "PRJ-001-WRK-002", "quantity": 2,
+    })
+    assert latest.status_code == 201
+    assert (latest.json()["name"], latest.json()["unit"], latest.json()["labor_unit_rate"], latest.json()["labor_total"]) == (
+        "Changed master", "кг", 999, 1998,
+    )
+
+
+def test_create_from_master_overrides_and_not_found_contract(client, db_session):
+    add_project(db_session)
+    assert client.post("/api/v1/projects/PRJ-001/work-items/from-master", json={
+        "work_master_id": "MISSING", "work_id": "W-1",
+    }).status_code == 404
+    db_session.add(WorkMaster(work_master_id="WKM-000001", name="Default", default_unit="м²", default_labor_unit_rate=2))
+    db_session.commit()
+    response = client.post("/api/v1/projects/PRJ-001/work-items/from-master", json={
+        "work_master_id": "WKM-000001", "work_id": "W-1", "name": " Override ",
+        "unit": " kg ", "labor_unit_rate": 3, "quantity": 4,
+    })
+    assert response.status_code == 201
+    assert (response.json()["name"], response.json()["unit"], response.json()["labor_total"]) == ("Override", "кг", 12)
+    assert client.post("/api/v1/projects/PRJ-001/work-items/from-master", json={
+        "work_master_id": "WKM-000001", "work_id": "W-1",
+    }).status_code == 409
+
+
+@pytest.mark.parametrize(
+    ("master_status", "requested_status", "expected_status"),
+    [
+        ("VALID", "ACTIVE", "ACTIVE"),
+        ("ACTIVE", "VALID", "ACTIVE"),
+        ("ACTIVE_WITH_WARNINGS", "ACTIVE", "ACTIVE_WITH_WARNINGS"),
+        ("NEEDS_REVIEW", "ACTIVE", "NEEDS_REVIEW"),
+    ],
+)
+def test_from_master_status_cannot_hide_master_warning(client, db_session, master_status, requested_status, expected_status):
+    add_project(db_session)
+    db_session.add(WorkMaster(work_master_id="WKM-000001", name="Master", status=master_status))
+    db_session.commit()
+    response = client.post("/api/v1/projects/PRJ-001/work-items/from-master", json={
+        "work_master_id": "WKM-000001", "work_id": "W-1", "status": requested_status,
+    })
+    assert response.status_code == 201
+    assert response.json()["status"] == expected_status
+
+
+@pytest.mark.parametrize("master_status", ["REJECTED", "SUPERSEDED"])
+def test_from_master_rejects_unusable_master_and_session_recovers(client, db_session, master_status):
+    add_project(db_session)
+    master = WorkMaster(work_master_id="WKM-000001", name="Master", status=master_status)
+    db_session.add(master)
+    db_session.commit()
+    response = client.post("/api/v1/projects/PRJ-001/work-items/from-master", json={
+        "work_master_id": "WKM-000001", "work_id": "W-1",
+    })
+    assert response.status_code == 409
+    assert "internal" not in response.text.lower() and "sql" not in response.text.lower()
+    master.status = StatusEnum.ACTIVE
+    db_session.commit()
+    assert client.post("/api/v1/projects/PRJ-001/work-items/from-master", json={
+        "work_master_id": "WKM-000001", "work_id": "W-1",
+    }).status_code == 201
+
+
+def test_from_master_null_and_zero_overrides_are_distinct(client, db_session):
+    add_project(db_session)
+    db_session.add(WorkMaster(
+        work_master_id="WKM-000001", name="Master", default_unit="м²",
+        default_labor_unit_rate=50,
+    ))
+    db_session.commit()
+    null_override = client.post("/api/v1/projects/PRJ-001/work-items/from-master", json={
+        "work_master_id": "WKM-000001", "work_id": "W-NULL", "quantity": 2,
+        "unit": None, "labor_unit_rate": None,
+    })
+    assert null_override.status_code == 201
+    assert null_override.json()["unit"] is None
+    assert null_override.json()["labor_unit_rate"] is None
+    assert null_override.json()["labor_total"] is None
+    zero_override = client.post("/api/v1/projects/PRJ-001/work-items/from-master", json={
+        "work_master_id": "WKM-000001", "work_id": "W-ZERO", "quantity": 3,
+        "labor_unit_rate": 0,
+    })
+    assert zero_override.status_code == 201
+    assert zero_override.json()["labor_unit_rate"] == 0
+    assert zero_override.json()["labor_total"] == 0
+
+
+def test_from_master_openapi_has_no_internal_identifiers(client):
+    spec = client.get("/openapi.json").json()
+    operation = spec["paths"]["/api/v1/projects/{project_id}/work-items/from-master"]["post"]
+    ref = operation["responses"]["201"]["content"]["application/json"]["schema"]["$ref"].split("/")[-1]
+    response_fields = set(spec["components"]["schemas"][ref]["properties"])
+    assert "work_master_id" in response_fields
+    assert {"id", "project_id", "work_master_ref_id"}.isdisjoint(response_fields)

@@ -9,17 +9,45 @@ from app.core.database import get_db
 from app.repositories.work_items import (
     DuplicateWorkIdError,
     WorkItemPersistenceError,
+    InvalidWorkMasterStatusError,
+    WorkMasterNotFoundError,
     create_work_item,
+    create_work_item_from_master,
     list_work_items_for_project,
     update_work_item,
 )
-from app.schemas.schemas import ProjectWorkItemCreate, ProjectWorkItemResponse, WorkItemUpdateRequest, WorkItemPatchResponse
+from app.schemas.schemas import ProjectWorkItemCreate, ProjectWorkItemFromMasterCreate, ProjectWorkItemResponse, WorkItemUpdateRequest, WorkItemPatchResponse
 
 
 router = APIRouter(
     prefix="/api/v1/projects/{project_id}/work-items",
     tags=["work-items"],
 )
+
+
+@router.post(
+    "/from-master",
+    response_model=WorkItemPatchResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_project_work_item_from_master(
+    project_id: str,
+    request: ProjectWorkItemFromMasterCreate,
+    db: Annotated[Session, Depends(get_db)],
+) -> WorkItemPatchResponse:
+    try:
+        work = create_work_item_from_master(db, project_id, request)
+    except WorkMasterNotFoundError as exc:
+        raise HTTPException(404, detail="Work master not found") from exc
+    except InvalidWorkMasterStatusError as exc:
+        raise HTTPException(409, detail="Work master status does not allow project work creation") from exc
+    except DuplicateWorkIdError as exc:
+        raise HTTPException(409, detail="Work ID already exists") from exc
+    except WorkItemPersistenceError as exc:
+        raise HTTPException(500, detail="Unable to create work item") from exc
+    if work is None:
+        raise HTTPException(404, detail="Project not found")
+    return work
 
 
 @router.patch("/{work_id}", response_model=WorkItemPatchResponse)
