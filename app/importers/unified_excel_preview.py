@@ -474,6 +474,7 @@ def run_preview(
     report_dir: Path,
     repository_root: Path | None = None,
     generated_at_utc: str | None = None,
+    write_reports: bool = True,
 ) -> PreviewResult:
     """Validate, compare, and report without changing workbook or database."""
     workbook_path = file_path.expanduser().resolve(strict=True)
@@ -509,5 +510,5 @@ def run_preview(
         raise PreviewValidationError("Workbook changed during preview")
     if summary["database"]["sha256_after"] != database_hash_before:
         raise PreviewValidationError("Database changed during preview")
-    report_paths = write_preview_reports(output_dir, summary, work_rows, material_rows)
+    report_paths = write_preview_reports(output_dir, summary, work_rows, material_rows) if write_reports else []
     return PreviewResult(summary, work_rows, material_rows, report_paths)
