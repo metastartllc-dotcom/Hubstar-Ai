@@ -571,3 +571,51 @@ production import биш.
 proposal `NEEDS_REVIEW` байна. Эдгээр үнийг дараагийн шатанд судалж баталгаажуулна.
 Fuzzy match болон category median-ийг автоматаар үнэ болгохгүй. Одоогийн preview-д
 Equipment, transport болон WorkMaterialLink импорт орохгүй.
+
+## Unified master-data apply
+
+Actual import нь тусдаа explicit `--apply` горимтой. Import хийхийн өмнө application
+server-ийг оператор бүрэн зогсоож, database-ийн WAL/SHM sidecar байхгүйг шалгана.
+Importer server process-ийг өөрөө зогсоохгүй. `--dry-run` болон `--apply` нь
+харилцан үл нийцэх бөгөөд аль нэгийг нь заавал сонгоно.
+
+```powershell
+.\.venv\Scripts\python.exe -m app.cli.import_excel `
+  --file "C:\absolute\input\Hubstar_6R_7R_Material_Unified_Import.xlsx" `
+  --project-id "PRJ-ALTAI-R7-B" `
+  --database-path "C:\absolute\database\hubstar.db" `
+  --apply `
+  --plan "C:\absolute\plan\import-preview-summary.json" `
+  --expected-workbook-sha256 "<sha256>" `
+  --expected-database-sha256 "<pre-write-sha256>" `
+  --backup-path "D:\safe-backups\hubstar-before-import.db" `
+  --report-dir "D:\safe-reports\new-directory" `
+  --confirm "IMPORT 65 WORK MASTERS 64 WORK ITEMS 980 MATERIALS"
+```
+
+Apply нь path, hash, plan, revision, integrity, conflict болон expected action-уудыг
+backup/write-ээс өмнө шалгана. Preflight амжилттай бол Python SQLite backup API-аар
+repository/database directory-оос гадуур шинэ backup үүсгэж баталгаажуулаад,
+Work Master, WorkItem, Material, ImportBatch болон aggregate AuditLog-ийг нэг
+transaction-д хадгална. Existing facade WorkItem дээр зөвхөн master reference
+холбоно; snapshot утгуудыг өөрчлөхгүй. Existing зургаан Material мөн өөрчлөгдөхгүй.
+
+Дахин тооцсон plan бүх 65 master, 65 work, 986 material-ийг identical гэж үзвэл
+`NO_CHANGES` report гаргаж, backup/domain/audit write хийхгүй. Execution report-д
+absolute local path хадгалахгүй.
+
+Production дараалал: (1) server/process-ийг зогсоох, (2) migration-ийн өмнөх
+production backup авах, (3) `0003_work_equipment_links`-оос
+`0004_work_masters` руу migration хийх, (4) integrity болон шинэ database hash-ийг
+шалгах, (5) заавал `0004` database дээр шинэ dry-run plan үүсгэх, (6) тэр plan
+болон шинэ database hash-аар `--apply` ажиллуулах, (7) importer-ийн тусдаа
+pre-import backup-ийг баталгаажуулах, (8) post-import verification хийх, (9)
+server-ийг дахин эхлүүлэх. `0003` database дээр үүсгэсэн plan-ийг `0004`
+database-д apply хийж болохгүй; hash/plan хамгаалалт ийм оролдлогыг fail closed
+болгоно.
+
+Import-ийн дараа 64 шинэ WorkItem material link-гүй байна. Иймээс dashboard 65
+ажлын labor subtotal-ийг харуулах боловч материалын subtotal-д зөвхөн facade-ийн
+одоо байгаа зургаан link, equipment subtotal-д одоо байгаа crane link орно.
+`no_materials_work_count` нэмэгдэж project pricing status `INCOMPLETE` болох нь
+одоогийн model-ийн expected behavior юм.
