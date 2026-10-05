@@ -619,3 +619,56 @@ Import-ийн дараа 64 шинэ WorkItem material link-гүй байна. �
 одоо байгаа зургаан link, equipment subtotal-д одоо байгаа crane link орно.
 `no_materials_work_count` нэмэгдэж project pricing status `INCOMPLETE` болох нь
 одоогийн model-ийн expected behavior юм.
+
+## Work Master material recipe preview
+
+Canonical master-data workbook дахь Work Master–Material орцын нормыг database-д
+хадгалахаас өмнө дараах тусдаа, зөвхөн унших preview командыг ашиглана. Команд
+`--dry-run`-гүй үед fail closed бөгөөд apply/import горим огт агуулахгүй.
+
+```powershell
+.\.venv\Scripts\python.exe -m app.cli.preview_work_master_material_recipes `
+  --file "C:\absolute\path\Hubstar_Construction_Master_Data_v2_Reviewed.xlsx" `
+  --project-id "PRJ-ALTAI-R7-B" `
+  --database-path "C:\absolute\path\hubstar.db" `
+  --dry-run `
+  --report-dir "D:\new-empty-recipe-preview"
+```
+
+SQLite connection нь `mode=ro`, `query_only=ON` ашиглана. Report directory нь
+repository, workbook болон database байрлах directory-оос гадна шинэ эсвэл хоосон
+байх ёстой бөгөөд existing report-ийг overwrite хийхгүй. JSON нь deterministic,
+CSV файлууд UTF-8 BOM, external ID тогтвортой дараалалтай гарна.
+
+Preview нь 106 Work Master, 867 Material Master, 733 recipe болон 165 material
+alias contract-ийг шалгана. `ACTIVE` 654 мөрөөс зөвхөн дотоод validation давсан
+proposal-г ялгаж, `NEEDS_REVIEW` 79 мөрийг import-аас хассан хэвээр тайлагнана.
+Орцын норм эерэг finite, хаягдлын хувь 0–100 байна. Unit conversion хийхгүй,
+reviewed proposal name/unit-ийг approval-гүй хэрэглэхгүй. Workbook-ийн internal
+conflict болон production database-д reference хараахан байхгүй
+`PRODUCTION_NOT_READY` төлөвийг тусдаа ангилна.
+
+`ACTIVE valid proposal` нь production-ready гэсэн үг биш. Эхлээд workbook-ийн
+internal validation-ийг давах ба дараа нь production database-д Work Master болон
+Material reference хоёулаа байх шаардлагатай. Internal `INVALID` эсвэл
+`NEEDS_REVIEW` мөр reference нь байсан ч importable/`READY` болохгүй. Summary нь
+raw production reference readiness-ийг тусад нь харуулж reconciliation хийх
+боломж өгнө. Blocking internal conflict гарсан үед долоон report бүрэн бичигдсэний
+дараа CLI non-zero exit code буцаана.
+
+Workbook-ийн 79 `NEEDS_REVIEW` мөрийн rate бүгд хоосон гэж таамаглахгүй: rate
+өгөгдсөн эсэхээс үл хамааран эдгээр нь review-only, import-аас хасагдана. Source
+provenance болон нэгжийн validation давсан норм ч зөвхөн proposal хэвээр; эх
+төслөөс гаргасан нормыг бүх төсөлд батлагдсан стандарт норм гэж нэрлэхгүй.
+
+Одоогийн facade ажилд хадгалагдсан зургаан project-specific WorkMaterialLink нь
+master recipe болж автоматаар хувирахгүй; хамгаалагдсан reference report-д тусдаа
+гарна. Үүсэх долоон report:
+
+- `work-master-material-recipe-summary.json`
+- `work-master-material-recipe-preview.csv`
+- `work-master-material-recipe-active.csv`
+- `work-master-material-recipe-review.csv`
+- `work-master-material-recipe-conflicts.csv`
+- `material-alias-validation.csv`
+- `protected-project-material-links.csv`
