@@ -672,3 +672,38 @@ master recipe болж автоматаар хувирахгүй; хамгаал
 - `work-master-material-recipe-conflicts.csv`
 - `material-alias-validation.csv`
 - `protected-project-material-links.csv`
+
+## Canonical master-data reconciliation
+
+Canonical workbook болон production master data-г өөрчлөлт хийхгүй тулгахдаа:
+
+```powershell
+.\.venv\Scripts\python.exe -m app.cli.reconcile_canonical_master_data `
+  --file "C:\absolute\path\Hubstar_Construction_Master_Data_v2_Reviewed.xlsx" `
+  --project-id "PRJ-ALTAI-R7-B" `
+  --database-path "C:\absolute\path\hubstar.db" `
+  --dry-run `
+  --report-dir "D:\new-empty-reconciliation-report"
+```
+
+Preview нь `KEEP_IDENTICAL`, `CREATE_PROPOSAL`, `UPDATE_REVIEW_REQUIRED`,
+`ALIAS_REVIEW_REQUIRED`, `CONFLICT`, `RETAIN_PRODUCTION_ONLY` action гаргана.
+Ижил нэр/нэгж нь entity merge хийх зөвшөөрөл биш; specification ялгаатай мөрийг
+нэгтгэхгүй. Production-ийн non-null үнэ workbook-ийн blank үнээр солигдохгүй.
+Reviewed/proposed name/unit болон unit conversion автоматаар хэрэглэгдэхгүй.
+
+`WORK_PACKAGE` alias нь source work-package mapping болохоос WorkMaster alias биш.
+Alias report нь project link өөрчлөх, production-only material устгах зөвшөөрөл
+өгөхгүй. Recipe readiness нь internal validation, production reference,
+semantic/unit match болон create/update dependency-г тусад нь харуулна.
+`INVALID` болон `NEEDS_REVIEW` recipe importable биш. Existing facade material
+links, хөдөлмөрийн snapshot, material price, Equipment Master болон crane snapshot
+нь protected read-only report-д орно.
+
+Recipe report-ийн `semantic_match=MATCH` нь workbook болон production reference
+хоёулаа байхад name, material specification ижил болохыг хэлнэ. Reference дутуу
+бол `NOT_EVALUATED`; үүнийг semantic equivalence гэж үзэхгүй. Нэг recipe олон
+dependency-тэй бол CREATE, UPDATE, ALIAS, semantic болон unit асуудлыг бүгдийг
+`dependency_actions` талбарт хадгална. Summary нь update шаардсан unique entity
+тоо болон name/unit/specification/price/status/source identity field-difference
+occurrence-ийг тусад нь гаргана.
